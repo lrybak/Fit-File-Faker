@@ -22,6 +22,7 @@ badges and challenges (see [1](https://forums.zwift.com/t/garmin-disabled-zwift-
 - [jat255](https://github.com/jat255): Primary author
 - [benjmarshall](https://github.com/benjmarshall): bug fixes, monitor mode, and other improvements
 - [Kellett](https://github.com/Kellett): support for Zwift FIT files
+- [lrybak](https://github.com/lrybak): support for Hammerhead Karoo files
 
 ## Installation
 
