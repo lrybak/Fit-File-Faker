@@ -229,7 +229,8 @@ def rewrite_file_id_message(
         m.manufacturer == Manufacturer.ZWIFT.value or 
         m.manufacturer == Manufacturer.WAHOO_FITNESS.value or 
         m.manufacturer == Manufacturer.PEAKSWARE.value or 
-        m.manufacturer == Manufacturer.HAMMERHEAD.value
+        m.manufacturer == Manufacturer.HAMMERHEAD.value or
+        m.manufacturer == 331 # MYWHOOSH is unknown to fit_tools
     ):
         new_m.manufacturer = Manufacturer.GARMIN.value
         new_m.product = GarminProduct.EDGE_830.value
@@ -292,7 +293,8 @@ def edit_fit(
                     message.manufacturer == Manufacturer.WAHOO_FITNESS.value or
                     message.manufacturer == Manufacturer.ZWIFT.value or
                     message.manufacturer == Manufacturer.PEAKSWARE.value or 
-                    message.manufacturer == Manufacturer.HAMMERHEAD.value
+                    message.manufacturer == Manufacturer.HAMMERHEAD.value or
+                    message.manufacturer == 331  # MYWHOOSH is unknown to fit_tools
                 ):
                     _logger.debug("    Modifying values")
                     message.garmin_product = GarminProduct.EDGE_830.value
