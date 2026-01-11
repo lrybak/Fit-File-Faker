@@ -39,8 +39,5 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 fit-file-faker = "fit_file_faker.app:run"
 
-[tool.setuptools]
-py-modules = ["app"]
-
 [tool.uv]
 package = true
