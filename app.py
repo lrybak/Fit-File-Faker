@@ -771,6 +771,47 @@ def run():
             for f in files_to_edit:
                 edit_fit(f, dryrun=args.dryrun)
 
+def fit_crc_get16(crc: int, byte: int) -> int:
+    """
+    Calculate FIT file CRC-16 checksum.
+
+    Arguments
+    ---------
+        crc: Current CRC value (16-bit unsigned)
+        byte: Byte to add to checksum (8-bit unsigned)
+
+    Returns
+    -------
+        Updated CRC value (16-bit unsigned)
+
+    Examples
+    --------
+
+        # Calculate CRC for a byte array
+        def calculate_fit_crc(data: bytes) -> int:
+            '''Calculate CRC-16 for FIT file data.'''
+            crc = 0
+            for byte in data:
+                crc = fit_crc_get16(crc, byte)
+            return crc
+
+    """
+    crc_table = [
+        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
+        0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400
+    ]
+
+    # Compute checksum of lower four bits of byte
+    tmp = crc_table[crc & 0xF]
+    crc = (crc >> 4) & 0x0FFF
+    crc = crc ^ tmp ^ crc_table[byte & 0xF]
+
+    # Now compute checksum of upper four bits of byte
+    tmp = crc_table[crc & 0xF]
+    crc = (crc >> 4) & 0x0FFF
+    crc = crc ^ tmp ^ crc_table[(byte >> 4) & 0xF]
+
+    return crc
 
 if __name__ == "__main__":
     run()

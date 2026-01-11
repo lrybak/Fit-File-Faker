@@ -10,3 +10,5 @@
 dist
 test
 __pycache__
+.DS_Store
+TODO.txt
