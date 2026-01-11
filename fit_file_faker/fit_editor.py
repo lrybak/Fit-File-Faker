@@ -13,6 +13,7 @@ from typing import Optional
 from fit_tool.definition_message import DefinitionMessage
 from fit_tool.fit_file import FitFile
 from fit_tool.fit_file_builder import FitFileBuilder
+from fit_tool.profile.messages.activity_message import ActivityMessage
 from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
 from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
@@ -103,7 +104,9 @@ class FitEditor:
             Manufacturer.ZWIFT.value,
             Manufacturer.WAHOO_FITNESS.value,
             Manufacturer.PEAKSWARE.value,
-            Manufacturer.HAMMERHEAD.value
+            Manufacturer.HAMMERHEAD.value,
+            Manufacturer.COROS.value,
+            331  # MYWHOOSH is unknown to fit_tools
         ]
     
     def _should_modify_device_info(self, manufacturer: int | None) -> bool:
@@ -116,9 +119,47 @@ class FitEditor:
             Manufacturer.WAHOO_FITNESS.value,
             Manufacturer.ZWIFT.value,
             Manufacturer.PEAKSWARE.value,
-            Manufacturer.HAMMERHEAD.value
+            Manufacturer.HAMMERHEAD.value,
+            Manufacturer.COROS.value,
+            331  # MYWHOOSH is unknown to fit_tools
         ]
-    
+
+    def strip_unknown_fields(self, fit_file: FitFile) -> None:
+        """
+        Force regeneration of definition messages for messages with unknown fields.
+
+        This fixes a bug where fit_tool skips unknown fields (like Zwift's field 193)
+        during reading but keeps them in the definition, causing a mismatch when writing.
+
+        Sets definition_message to None for affected messages, forcing FitFileBuilder
+        to regenerate clean definitions based only on fields that exist.
+
+        Modifies messages in place.
+        """
+        for record in fit_file.records:
+            message = record.message
+            if not hasattr(message, 'definition_message') or message.definition_message is None:
+                continue
+            if not hasattr(message, 'fields'):
+                continue
+
+            # Get the set of field IDs that actually exist in the message
+            existing_field_ids = {field.field_id for field in message.fields if field.is_valid()}
+
+            # Check if definition has fields that don't exist in the message
+            definition_field_ids = {
+                fd.field_id for fd in message.definition_message.field_definitions
+            }
+
+            unknown_fields = definition_field_ids - existing_field_ids
+            if unknown_fields:
+                _logger.debug(
+                    f"Clearing definition for {message.name} (global_id={message.global_id}) "
+                    f"to force regeneration (had {len(unknown_fields)} unknown field(s))"
+                )
+                # Set to None to force FitFileBuilder to regenerate it
+                message.definition_message = None
+
     def edit_fit(
         self, 
         fit_path: Path, 
@@ -146,15 +187,27 @@ class FitEditor:
         except Exception:
             _logger.error("File does not appear to be a FIT file, skipping...")
             return None
-        
+
+        # Strip unknown field definitions to prevent corruption when rewriting
+        self.strip_unknown_fields(fit_file)
+
         if not output:
             output = fit_path.parent / f"{fit_path.stem}_modified.fit"
 
         builder = FitFileBuilder(auto_define=True)
-        
+        skipped_device_type_zero = False
+
+        # Collect Activity messages to write at the end (fixes COROS file ordering)
+        activity_messages = []
+
         # Loop through records, find the ones we need to change, and modify the values
         for i, record in enumerate(fit_file.records):
             message = record.message
+
+            # Defer Activity messages until the end to ensure proper ordering
+            if isinstance(message, ActivityMessage):
+                activity_messages.append(message)
+                continue
 
             # Change file id to indicate file was saved by Edge 830
             if message.global_id == FileIdMessage.ID:
@@ -183,15 +236,36 @@ class FitEditor:
             if message.global_id == DeviceInfoMessage.ID:
                 if isinstance(message, DeviceInfoMessage):
                     self.print_message(f"DeviceInfoMessage Record: {i}", message)
+                    if message.device_type == 0:
+                        _logger.debug("    Skipping device_type 0")
+                        skipped_device_type_zero = True
+                        continue
+
+                    # Renumber device_index if we skipped device_type 0
+                    if skipped_device_type_zero and message.device_index is not None:
+                        _logger.debug(f"    Renumbering device_index from {message.device_index} to {message.device_index - 1}")
+                        message.device_index = message.device_index - 1
+
                     if self._should_modify_device_info(message.manufacturer):
                         _logger.debug("    Modifying values")
-                        message.garmin_product = GarminProduct.EDGE_830.value
-                        message.product = GarminProduct.EDGE_830.value  # type: ignore
-                        message.manufacturer = Manufacturer.GARMIN.value
+                        _logger.debug(f"garmin_product: {message.garmin_product}")
+                        _logger.debug(f"product: {message.product}")
+                        if message.garmin_product:
+                            message.garmin_product = GarminProduct.EDGE_830.value
+                        if message.product:
+                            message.product = GarminProduct.EDGE_830.value  # type: ignore
+                        if message.manufacturer:
+                            message.manufacturer = Manufacturer.GARMIN.value
                         message.product_name = ""
                         self.print_message(f"    New Record: {i}", message)
 
             builder.add(message)
+
+        # Add Activity messages at the end to ensure proper FIT file structure
+        if activity_messages:
+            _logger.debug(f"Adding {len(activity_messages)} Activity message(s) at the end")
+            for activity_msg in activity_messages:
+                builder.add(activity_msg)
 
         modified_file = builder.build()
         

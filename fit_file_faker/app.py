@@ -23,9 +23,6 @@ from rich.traceback import install
 from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers.polling import PollingObserver as Observer
 
-from .config import config_manager, dirs
-from .fit_editor import fit_editor
-
 _logger = logging.getLogger("garmin")
 install()
 
@@ -36,10 +33,45 @@ logging.basicConfig(
     datefmt="[%X]",
     handlers=[RichHandler(markup=True)],
 )
-logging.basicConfig()
 _logger.setLevel(logging.INFO)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 logging.getLogger("oauth1_auth").setLevel(logging.WARNING)
+
+from fit_tool.base_type import BaseType
+from fit_tool.field import Field
+
+from .config import config_manager, dirs
+from .fit_editor import fit_editor
+
+# Monkey patch fit_tool to handle malformed FIT files (e.g., COROS)
+# that have field sizes not matching their base type sizes
+_original_get_length_from_size = Field.get_length_from_size
+
+
+def _lenient_get_length_from_size(base_type, size):
+    """
+    Lenient version that truncates instead of raising exception.
+
+    Some manufacturers (e.g., COROS) create FIT files with fields where
+    the size is not a multiple of the base type size. Instead of failing,
+    we truncate to the nearest valid length.
+    """
+    if base_type == BaseType.STRING or base_type == BaseType.BYTE:
+        return 0 if size == 0 else 1
+    else:
+        length = size // base_type.size
+
+        if length * base_type.size != size:
+            _logger.debug(
+                f"Field size ({size}) not multiple of type size ({base_type.size}), "
+                f"truncating to length {length}"
+            )
+            return length
+
+        return length
+
+
+Field.get_length_from_size = staticmethod(_lenient_get_length_from_size)
 
 c = Console()
 FILES_UPLOADED_NAME = Path(".uploaded_files.json")
