@@ -212,7 +212,7 @@ def rewrite_file_id_message(
 
     new_m = FileIdMessage()
     new_m.time_created = (
-        m.time_created if m.time_created 
+        m.time_created if m.time_created
         else int(dt.now().timestamp() * 1000)
     )
     if m.type:
@@ -223,12 +223,12 @@ def rewrite_file_id_message(
         # garmin does not appear to define product_name, so don't copy it over
         pass
         # new_m.product_name = m.product_name
-    
+
     if (
-        m.manufacturer == Manufacturer.DEVELOPMENT.value or 
-        m.manufacturer == Manufacturer.ZWIFT.value or 
-        m.manufacturer == Manufacturer.WAHOO_FITNESS.value or 
-        m.manufacturer == Manufacturer.PEAKSWARE.value or 
+        m.manufacturer == Manufacturer.DEVELOPMENT.value or
+        m.manufacturer == Manufacturer.ZWIFT.value or
+        m.manufacturer == Manufacturer.WAHOO_FITNESS.value or
+        m.manufacturer == Manufacturer.PEAKSWARE.value or
         m.manufacturer == Manufacturer.HAMMERHEAD.value or
         m.manufacturer == 331 # MYWHOOSH is unknown to fit_tools
     ):
@@ -256,6 +256,7 @@ def edit_fit(
         output = fit_path.parent / f"{fit_path.stem}_modified.fit"
 
     builder = FitFileBuilder(auto_define=True)
+    skipped_device_type_zero = False
     # loop through records, find the one we need to change, and modify the values:
     for i, record in enumerate(fit_file.records):
         message = record.message
@@ -278,7 +279,7 @@ def edit_fit(
                 builder.add(DefinitionMessage.from_data_message(message))
                 builder.add(message)
                 continue
-        
+
         if message.global_id == FileCreatorMessage.ID:
             # skip any existing file creator message
             continue
@@ -287,12 +288,22 @@ def edit_fit(
         if message.global_id == DeviceInfoMessage.ID:
             if isinstance(message, DeviceInfoMessage):
                 print_message(f"DeviceInfoMessage Record: {i}", message)
+                if message.device_type == 0:
+                    _logger.debug("    Skipping device_type 0")
+                    skipped_device_type_zero = True
+                    continue
+
+                # Renumber device_index if we skipped device_type 0
+                if skipped_device_type_zero and message.device_index is not None:
+                    _logger.debug(f"    Renumbering device_index from {message.device_index} to {message.device_index - 1}")
+                    message.device_index = message.device_index - 1
+
                 if (
                     message.manufacturer == Manufacturer.DEVELOPMENT.value or
                     message.manufacturer == 0 or
                     message.manufacturer == Manufacturer.WAHOO_FITNESS.value or
                     message.manufacturer == Manufacturer.ZWIFT.value or
-                    message.manufacturer == Manufacturer.PEAKSWARE.value or 
+                    message.manufacturer == Manufacturer.PEAKSWARE.value or
                     message.manufacturer == Manufacturer.HAMMERHEAD.value or
                     message.manufacturer == 331  # MYWHOOSH is unknown to fit_tools
                 ):
