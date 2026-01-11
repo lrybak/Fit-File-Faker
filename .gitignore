@@ -12,3 +12,9 @@ test
 __pycache__
 .DS_Store
 TODO.txt
+
+# Test coverage
+.coverage
+htmlcov/
+coverage.xml
+.pytest_cache/

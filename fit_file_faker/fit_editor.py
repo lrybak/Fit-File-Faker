@@ -32,12 +32,14 @@ class FitFileLogFilter(logging.Filter):
 
 class FitEditor:
     """Handles FIT file editing and manipulation."""
-    
+
     def __init__(self):
         # Apply the log filter to suppress noisy fit_tool warnings
         logging.getLogger("fit_tool").addFilter(FitFileLogFilter())
-    
-    def print_message(self, prefix: str, message: FileIdMessage | DeviceInfoMessage) -> None:
+
+    def print_message(
+        self, prefix: str, message: FileIdMessage | DeviceInfoMessage
+    ) -> None:
         """Print debug information about FIT file messages."""
         man = (
             Manufacturer(message.manufacturer).name
@@ -49,9 +51,11 @@ class FitEditor:
             if message.garmin_product in GarminProduct
             else "BLANK"
         )
-        _logger.debug(f"{prefix} - {message.to_row()=}\n"
-                      f"(Manufacturer: {man}, product: {message.product}, garmin_product: {gar_prod})")
-    
+        _logger.debug(
+            f"{prefix} - {message.to_row()=}\n"
+            f"(Manufacturer: {man}, product: {message.product}, garmin_product: {gar_prod})"
+        )
+
     def get_date_from_fit(self, fit_path: Path) -> Optional[datetime]:
         """Extract the creation date from a FIT file."""
         fit_file = FitFile.from_file(str(fit_path))
@@ -63,9 +67,9 @@ class FitEditor:
                     res = datetime.fromtimestamp(message.time_created / 1000.0)  # type: ignore
                     break
         return res
-    
+
     def rewrite_file_id_message(
-        self, 
+        self,
         m: FileIdMessage,
         message_num: int,
     ) -> tuple[DefinitionMessage, FileIdMessage]:
@@ -76,8 +80,7 @@ class FitEditor:
 
         new_m = FileIdMessage()
         new_m.time_created = (
-            m.time_created if m.time_created 
-            else int(datetime.now().timestamp() * 1000)
+            m.time_created if m.time_created else int(datetime.now().timestamp() * 1000)
         )
         if m.type:
             new_m.type = m.type
@@ -86,7 +89,7 @@ class FitEditor:
         if m.product_name:
             # garmin does not appear to define product_name, so don't copy it over
             pass
-        
+
         if self._should_modify_manufacturer(m.manufacturer):
             new_m.manufacturer = Manufacturer.GARMIN.value
             new_m.product = GarminProduct.EDGE_830.value
@@ -94,7 +97,7 @@ class FitEditor:
             self.print_message(f"    New Record: {message_num}", new_m)
 
         return (DefinitionMessage.from_data_message(new_m), new_m)
-    
+
     def _should_modify_manufacturer(self, manufacturer: int | None) -> bool:
         """Check if manufacturer should be modified to Garmin."""
         if manufacturer is None:
@@ -106,9 +109,9 @@ class FitEditor:
             Manufacturer.PEAKSWARE.value,
             Manufacturer.HAMMERHEAD.value,
             Manufacturer.COROS.value,
-            331  # MYWHOOSH is unknown to fit_tools
+            331,  # MYWHOOSH is unknown to fit_tools
         ]
-    
+
     def _should_modify_device_info(self, manufacturer: int | None) -> bool:
         """Check if device info should be modified to Garmin Edge 830."""
         if manufacturer is None:
@@ -121,7 +124,7 @@ class FitEditor:
             Manufacturer.PEAKSWARE.value,
             Manufacturer.HAMMERHEAD.value,
             Manufacturer.COROS.value,
-            331  # MYWHOOSH is unknown to fit_tools
+            331,  # MYWHOOSH is unknown to fit_tools
         ]
 
     def strip_unknown_fields(self, fit_file: FitFile) -> None:
@@ -138,13 +141,18 @@ class FitEditor:
         """
         for record in fit_file.records:
             message = record.message
-            if not hasattr(message, 'definition_message') or message.definition_message is None:
+            if (
+                not hasattr(message, "definition_message")
+                or message.definition_message is None
+            ):
                 continue
-            if not hasattr(message, 'fields'):
+            if not hasattr(message, "fields"):  # pragma: no cover
                 continue
 
             # Get the set of field IDs that actually exist in the message
-            existing_field_ids = {field.field_id for field in message.fields if field.is_valid()}
+            existing_field_ids = {
+                field.field_id for field in message.fields if field.is_valid()
+            }
 
             # Check if definition has fields that don't exist in the message
             definition_field_ids = {
@@ -161,38 +169,53 @@ class FitEditor:
                 message.definition_message = None
 
     def edit_fit(
-        self, 
-        fit_path: Path, 
-        output: Optional[Path] = None, 
-        dryrun: bool = False
+        self,
+        fit_input: Path | FitFile,
+        output: Optional[Path] = None,
+        dryrun: bool = False,
     ) -> Path | None:
         """
         Edit a FIT file to appear as if it came from a Garmin Edge 830.
-        
+
         Args:
-            fit_path: Path to the input FIT file
-            output: Optional output path (defaults to {original}_modified.fit)
+            fit_input: Path to the input FIT file OR a parsed FitFile object
+            output: Optional output path (defaults to {original}_modified.fit). Required if fit_input
+                    is a FitFile object rather than a Path
             dryrun: If True, don't actually write the file
-            
+
         Returns:
             Path to the output file, or None if processing failed
         """
         if dryrun:
             _logger.warning('In "dryrun" mode; will not actually write new file.')
-        
-        _logger.info(f'Processing "{fit_path}"')
-        
-        try:
-            fit_file = FitFile.from_file(str(fit_path))
-        except Exception:
-            _logger.error("File does not appear to be a FIT file, skipping...")
+
+        # Handle both Path and FitFile inputs
+        if isinstance(fit_input, Path):
+            fit_path = fit_input
+            _logger.info(f'Processing "{fit_path}"')
+
+            try:
+                fit_file = FitFile.from_file(str(fit_path))
+            except Exception:
+                _logger.error("File does not appear to be a FIT file, skipping...")
+                return None
+        elif isinstance(fit_input, FitFile):
+            fit_file = fit_input
+            fit_path = None  # No source path available
+            _logger.info("Processing parsed FIT file")
+        else:
+            _logger.error(f"Invalid input type: {type(fit_input)}")
             return None
 
         # Strip unknown field definitions to prevent corruption when rewriting
         self.strip_unknown_fields(fit_file)
 
         if not output:
-            output = fit_path.parent / f"{fit_path.stem}_modified.fit"
+            if fit_path:
+                output = fit_path.parent / f"{fit_path.stem}_modified.fit"
+            else:
+                _logger.error("Output path required when using parsed FIT file")
+                return None
 
         builder = FitFileBuilder(auto_define=True)
         skipped_device_type_zero = False
@@ -227,7 +250,7 @@ class FitEditor:
                     builder.add(DefinitionMessage.from_data_message(creator_message))
                     builder.add(creator_message)
                     continue
-            
+
             if message.global_id == FileCreatorMessage.ID:
                 # Skip any existing file creator message
                 continue
@@ -243,14 +266,17 @@ class FitEditor:
 
                     # Renumber device_index if we skipped device_type 0
                     if skipped_device_type_zero and message.device_index is not None:
-                        _logger.debug(f"    Renumbering device_index from {message.device_index} to {message.device_index - 1}")
+                        _logger.debug(
+                            f"    Renumbering device_index from {message.device_index} to {message.device_index - 1}"
+                        )
                         message.device_index = message.device_index - 1
 
                     if self._should_modify_device_info(message.manufacturer):
                         _logger.debug("    Modifying values")
                         _logger.debug(f"garmin_product: {message.garmin_product}")
                         _logger.debug(f"product: {message.product}")
-                        if message.garmin_product:
+                        # have not seen this set explicitly in testing, but probable good to set regardless
+                        if message.garmin_product:  # pragma: no cover
                             message.garmin_product = GarminProduct.EDGE_830.value
                         if message.product:
                             message.product = GarminProduct.EDGE_830.value  # type: ignore
@@ -263,12 +289,14 @@ class FitEditor:
 
         # Add Activity messages at the end to ensure proper FIT file structure
         if activity_messages:
-            _logger.debug(f"Adding {len(activity_messages)} Activity message(s) at the end")
+            _logger.debug(
+                f"Adding {len(activity_messages)} Activity message(s) at the end"
+            )
             for activity_msg in activity_messages:
                 builder.add(activity_msg)
 
         modified_file = builder.build()
-        
+
         if not dryrun:
             _logger.info(f'Saving modified data to "{output}"')
             modified_file.to_file(str(output))
@@ -277,7 +305,7 @@ class FitEditor:
                 f"Dryrun requested, so not saving data "
                 f'(would have written to "{output}")'
             )
-        
+
         return output
 
 

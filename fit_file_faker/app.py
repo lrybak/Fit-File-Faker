@@ -37,41 +37,12 @@ _logger.setLevel(logging.INFO)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 logging.getLogger("oauth1_auth").setLevel(logging.WARNING)
 
-from fit_tool.base_type import BaseType
-from fit_tool.field import Field
-
 from .config import config_manager, dirs
 from .fit_editor import fit_editor
+from .utils import apply_fit_tool_patch
 
-# Monkey patch fit_tool to handle malformed FIT files (e.g., COROS)
-# that have field sizes not matching their base type sizes
-_original_get_length_from_size = Field.get_length_from_size
-
-
-def _lenient_get_length_from_size(base_type, size):
-    """
-    Lenient version that truncates instead of raising exception.
-
-    Some manufacturers (e.g., COROS) create FIT files with fields where
-    the size is not a multiple of the base type size. Instead of failing,
-    we truncate to the nearest valid length.
-    """
-    if base_type == BaseType.STRING or base_type == BaseType.BYTE:
-        return 0 if size == 0 else 1
-    else:
-        length = size // base_type.size
-
-        if length * base_type.size != size:
-            _logger.debug(
-                f"Field size ({size}) not multiple of type size ({base_type.size}), "
-                f"truncating to length {length}"
-            )
-            return length
-
-        return length
-
-
-Field.get_length_from_size = staticmethod(_lenient_get_length_from_size)
+# Apply monkey patch to handle malformed FIT files (e.g., COROS)
+apply_fit_tool_patch()
 
 c = Console()
 FILES_UPLOADED_NAME = Path(".uploaded_files.json")
@@ -96,7 +67,7 @@ class NewFileEventHandler(PatternMatchingEventHandler):
             # Run the upload all function
             p = event.src_path
             if isinstance(p, bytes):
-                p = p.decode()
+                p = p.decode()  # pragma: no cover
             p = cast(str, p)
             upload_all(Path(p).parent.absolute())
         else:
@@ -211,7 +182,7 @@ def monitor(watch_dir: Path, dryrun: bool = False):
     observer = Observer()
     observer.schedule(event_handler, str(watch_dir.absolute()), recursive=True)
     observer.start()
-    if dryrun:
+    if dryrun:  # pragma: no cover
         _logger.warning("Dryrun was requested, so will not actually take any actions")
     _logger.info(f'Monitoring directory: "{watch_dir.absolute()}"')
     try:
@@ -312,10 +283,12 @@ def run():
 
     # if initial_setup, just do config file building
     if args.initial_setup:
-        config_manager.build_config_file(overwrite_existing_vals=True, rewrite_config=True)
+        config_manager.build_config_file(
+            overwrite_existing_vals=True, rewrite_config=True
+        )
         _logger.info(
             f'Config file has been written to "{config_manager.get_config_file_path()}", now run one of the other options to '
-            'start editing/uploading files!'
+            "start editing/uploading files!"
         )
         sys.exit(0)
     if not args.input_path and not (
@@ -378,47 +351,6 @@ def run():
             for f in files_to_edit:
                 fit_editor.edit_fit(f, dryrun=args.dryrun)
 
-def fit_crc_get16(crc: int, byte: int) -> int:
-    """
-    Calculate FIT file CRC-16 checksum.
 
-    Arguments
-    ---------
-        crc: Current CRC value (16-bit unsigned)
-        byte: Byte to add to checksum (8-bit unsigned)
-
-    Returns
-    -------
-        Updated CRC value (16-bit unsigned)
-
-    Examples
-    --------
-
-        # Calculate CRC for a byte array
-        def calculate_fit_crc(data: bytes) -> int:
-            '''Calculate CRC-16 for FIT file data.'''
-            crc = 0
-            for byte in data:
-                crc = fit_crc_get16(crc, byte)
-            return crc
-
-    """
-    crc_table = [
-        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
-        0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400
-    ]
-
-    # Compute checksum of lower four bits of byte
-    tmp = crc_table[crc & 0xF]
-    crc = (crc >> 4) & 0x0FFF
-    crc = crc ^ tmp ^ crc_table[byte & 0xF]
-
-    # Now compute checksum of upper four bits of byte
-    tmp = crc_table[crc & 0xF]
-    crc = (crc >> 4) & 0x0FFF
-    crc = crc ^ tmp ^ crc_table[(byte >> 4) & 0xF]
-
-    return crc
-
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     run()

@@ -23,6 +23,7 @@ badges and challenges (see [1](https://forums.zwift.com/t/garmin-disabled-zwift-
 - [benjmarshall](https://github.com/benjmarshall): bug fixes, monitor mode, and other improvements
 - [Kellett](https://github.com/Kellett): support for Zwift FIT files
 - [lrybak](https://github.com/lrybak): support for Hammerhead Karoo files
+- [dermarzel](https://github.com/dermarzel): support for MyWhoosh files
 
 ## Installation
 
@@ -71,6 +72,22 @@ If you want to install a development version, clone the repo, and use the
 $ git clone https://github.com/jat255/fit_file_uploader.git
 $ cd fit_file_uploader
 $ uv sync  # this installs the dependencies
+```
+
+#### Pre-commit hooks
+
+The project uses [pre-commit](https://pre-commit.com/) to run code quality checks before committing.
+After cloning the repo and running `uv sync`, install the pre-commit hooks:
+
+```bash
+$ uv run pre-commit install
+```
+
+This will automatically run `ruff check` and `ruff format` on staged files before each commit.
+You can also run the hooks manually on all files:
+
+```bash
+$ uv run pre-commit run --all-files
 ```
 
 ## Configuration

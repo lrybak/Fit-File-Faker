@@ -22,9 +22,19 @@ _logger = logging.getLogger("garmin")
 dirs = PlatformDirs("FitFileFaker", appauthor=False, ensure_exists=True)
 
 
+class PathEncoder(json.JSONEncoder):
+    """JSON encoder that handles Path objects."""
+
+    def default(self, obj):
+        if isinstance(obj, Path):
+            return str(obj)
+        return super().default(obj)  # pragma: no cover
+
+
 @dataclass
 class Config:
     """Configuration data class for Fit File Faker."""
+
     garmin_username: str | None = None
     garmin_password: str | None = None
     fitfiles_path: Path | None = None
@@ -32,44 +42,46 @@ class Config:
 
 class ConfigManager:
     """Manages configuration file operations and validation."""
-    
+
     def __init__(self):
         self.config_file = dirs.user_config_path / ".config.json"
         self.config_keys = ["garmin_username", "garmin_password", "fitfiles_path"]
         self.config = self._load_config()
-    
+
     def _load_config(self) -> Config:
         """Load configuration from file or create new Config if file doesn't exist."""
         self.config_file.touch(exist_ok=True)
-        
+
         with self.config_file.open("r") as f:
             if self.config_file.stat().st_size == 0:
                 return Config()
             else:
                 return Config(**json.load(f))
-    
+
     def save_config(self) -> None:
         """Save current configuration to file."""
         with self.config_file.open("w") as f:
-            json.dump(asdict(self.config), f, indent=2)
-    
+            json.dump(asdict(self.config), f, indent=2, cls=PathEncoder)
+
     def is_valid(self, excluded_keys: list[str] | None = None) -> bool:
         """Check if configuration is valid (all required keys have values)."""
         if excluded_keys is None:
             excluded_keys = []
-            
+
         missing_vals = []
         for k in self.config_keys:
             if (
                 not hasattr(self.config, k) or getattr(self.config, k) is None
             ) and k not in excluded_keys:
                 missing_vals.append(k)
-        
+
         if missing_vals:
-            _logger.error(f"The following configuration values are missing: {missing_vals}")
+            _logger.error(
+                f"The following configuration values are missing: {missing_vals}"
+            )
             return False
         return True
-    
+
     def build_config_file(
         self,
         overwrite_existing_vals: bool = False,
@@ -79,7 +91,7 @@ class ConfigManager:
         """Interactively build configuration file."""
         if excluded_keys is None:
             excluded_keys = []
-            
+
         for k in self.config_keys:
             if (
                 getattr(self.config, k) is None or overwrite_existing_vals
@@ -87,14 +99,19 @@ class ConfigManager:
                 valid_input = False
                 while not valid_input:
                     try:
-                        if not hasattr(self.config, k) or getattr(self.config, k) is None:
+                        if (
+                            not hasattr(self.config, k)
+                            or getattr(self.config, k) is None
+                        ):
                             _logger.warning(f'Required value "{k}" not found in config')
                         msg = f'Enter value to use for "{k}"'
 
                         if hasattr(self.config, k) and getattr(self.config, k):
                             msg += f'\nor press enter to use existing value of "{getattr(self.config, k)}"'
                             if k == "garmin_password":
-                                msg = msg.replace(getattr(self.config, k), "<**hidden**>")
+                                msg = msg.replace(
+                                    getattr(self.config, k), "<**hidden**>"
+                                )
 
                         if k != "fitfiles_path":
                             if "password" in k:
@@ -109,7 +126,7 @@ class ConfigManager:
                                     else None
                                 )
                             )
-                        
+
                         if val:
                             valid_input = True
                             setattr(self.config, k, val)
@@ -123,11 +140,11 @@ class ConfigManager:
                     except KeyboardInterrupt:
                         _logger.error("User canceled input; exiting!")
                         sys.exit(1)
-        
+
         if rewrite_config:
             self.save_config()
-        
-        config_content = json.dumps(asdict(self.config), indent=2)
+
+        config_content = json.dumps(asdict(self.config), indent=2, cls=PathEncoder)
         if (
             hasattr(self.config, "garmin_password")
             and getattr(self.config, "garmin_password") is not None
@@ -136,7 +153,7 @@ class ConfigManager:
                 cast(str, self.config.garmin_password), "<**hidden**>"
             )
         _logger.info(f"Config file is now:\n{config_content}")
-    
+
     def get_config_file_path(self) -> Path:
         """Get the path to the configuration file."""
         return self.config_file
