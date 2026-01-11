@@ -43,13 +43,45 @@ _logger.setLevel(logging.INFO)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 logging.getLogger("oauth1_auth").setLevel(logging.WARNING)
 
+from fit_tool.base_type import BaseType
 from fit_tool.definition_message import DefinitionMessage
+from fit_tool.field import Field
 from fit_tool.fit_file import FitFile
 from fit_tool.fit_file_builder import FitFileBuilder
 from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
 from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.profile_type import GarminProduct, Manufacturer
+
+# Monkey patch fit_tool to handle malformed FIT files (e.g., COROS)
+# that have field sizes not matching their base type sizes
+_original_get_length_from_size = Field.get_length_from_size
+
+
+def _lenient_get_length_from_size(base_type, size):
+    """
+    Lenient version that truncates instead of raising exception.
+
+    Some manufacturers (e.g., COROS) create FIT files with fields where
+    the size is not a multiple of the base type size. Instead of failing,
+    we truncate to the nearest valid length.
+    """
+    if base_type == BaseType.STRING or base_type == BaseType.BYTE:
+        return 0 if size == 0 else 1
+    else:
+        length = size // base_type.size
+
+        if length * base_type.size != size:
+            _logger.debug(
+                f"Field size ({size}) not multiple of type size ({base_type.size}), "
+                f"truncating to length {length}"
+            )
+            return length
+
+        return length
+
+
+Field.get_length_from_size = staticmethod(_lenient_get_length_from_size)
 
 c = Console()
 dirs = PlatformDirs("FitFileFaker", appauthor=False, ensure_exists=True)
@@ -230,7 +262,8 @@ def rewrite_file_id_message(
         m.manufacturer == Manufacturer.WAHOO_FITNESS.value or
         m.manufacturer == Manufacturer.PEAKSWARE.value or
         m.manufacturer == Manufacturer.HAMMERHEAD.value or
-        m.manufacturer == 331 # MYWHOOSH is unknown to fit_tools
+        m.manufacturer == Manufacturer.COROS.value or
+        m.manufacturer == 331  # MYWHOOSH is unknown to fit_tools
     ):
         new_m.manufacturer = Manufacturer.GARMIN.value
         new_m.product = GarminProduct.EDGE_830.value
@@ -298,9 +331,19 @@ def edit_fit(
 
     builder = FitFileBuilder(auto_define=True)
     skipped_device_type_zero = False
+
+    # Collect Activity messages to write at the end (fixes COROS file ordering)
+    from fit_tool.profile.messages.activity_message import ActivityMessage
+    activity_messages = []
+
     # loop through records, find the one we need to change, and modify the values:
     for i, record in enumerate(fit_file.records):
         message = record.message
+
+        # Defer Activity messages until the end to ensure proper ordering
+        if isinstance(message, ActivityMessage):
+            activity_messages.append(message)
+            continue
 
         # change file id to indicate file was saved by Edge 830
         if message.global_id == FileIdMessage.ID:
@@ -346,16 +389,28 @@ def edit_fit(
                     message.manufacturer == Manufacturer.ZWIFT.value or
                     message.manufacturer == Manufacturer.PEAKSWARE.value or
                     message.manufacturer == Manufacturer.HAMMERHEAD.value or
+                    message.manufacturer == Manufacturer.COROS.value or
                     message.manufacturer == 331  # MYWHOOSH is unknown to fit_tools
                 ):
                     _logger.debug("    Modifying values")
-                    message.garmin_product = GarminProduct.EDGE_830.value
-                    message.product = GarminProduct.EDGE_830.value  # type: ignore
-                    message.manufacturer = Manufacturer.GARMIN.value
+                    _logger.debug(f"garmin_product: {message.garmin_product}")
+                    _logger.debug(f"product: {message.product}")
+                    if message.garmin_product:
+                        message.garmin_product = GarminProduct.EDGE_830.value
+                    if message.product:
+                        message.product = GarminProduct.EDGE_830.value  # type: ignore
+                    if message.manufacturer:
+                        message.manufacturer = Manufacturer.GARMIN.value
                     message.product_name = ""
                     print_message(f"    New Record: {i}", message)
 
         builder.add(message)
+
+    # Add Activity messages at the end to ensure proper FIT file structure
+    if activity_messages:
+        _logger.debug(f"Adding {len(activity_messages)} Activity message(s) at the end")
+        for activity_msg in activity_messages:
+            builder.add(activity_msg)
 
     modified_file = builder.build()
     if not dryrun:
