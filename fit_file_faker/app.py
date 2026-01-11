@@ -11,7 +11,6 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Optional, cast
@@ -25,6 +24,7 @@ from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers.polling import PollingObserver as Observer
 
 from .config import config_manager, dirs
+from .fit_editor import fit_editor
 
 _logger = logging.getLogger("garmin")
 install()
@@ -41,59 +41,8 @@ _logger.setLevel(logging.INFO)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 logging.getLogger("oauth1_auth").setLevel(logging.WARNING)
 
-from fit_tool.base_type import BaseType
-from fit_tool.definition_message import DefinitionMessage
-from fit_tool.field import Field
-from fit_tool.fit_file import FitFile
-from fit_tool.fit_file_builder import FitFileBuilder
-from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
-from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
-from fit_tool.profile.messages.file_id_message import FileIdMessage
-from fit_tool.profile.profile_type import GarminProduct, Manufacturer
-
-# Monkey patch fit_tool to handle malformed FIT files (e.g., COROS)
-# that have field sizes not matching their base type sizes
-_original_get_length_from_size = Field.get_length_from_size
-
-
-def _lenient_get_length_from_size(base_type, size):
-    """
-    Lenient version that truncates instead of raising exception.
-
-    Some manufacturers (e.g., COROS) create FIT files with fields where
-    the size is not a multiple of the base type size. Instead of failing,
-    we truncate to the nearest valid length.
-    """
-    if base_type == BaseType.STRING or base_type == BaseType.BYTE:
-        return 0 if size == 0 else 1
-    else:
-        length = size // base_type.size
-
-        if length * base_type.size != size:
-            _logger.debug(
-                f"Field size ({size}) not multiple of type size ({base_type.size}), "
-                f"truncating to length {length}"
-            )
-            return length
-
-        return length
-
-
-Field.get_length_from_size = staticmethod(_lenient_get_length_from_size)
-
 c = Console()
 FILES_UPLOADED_NAME = Path(".uploaded_files.json")
-
-
-class FitFileLogFilter(logging.Filter):
-    """Filter to remove specific warning from the fit_tool module"""
-
-    def filter(self, record):
-        res = "\n\tactual: " not in record.getMessage()
-        return res
-
-
-logging.getLogger("fit_tool").addFilter(FitFileLogFilter())
 
 
 class NewFileEventHandler(PatternMatchingEventHandler):
@@ -122,226 +71,6 @@ class NewFileEventHandler(PatternMatchingEventHandler):
             _logger.warning(
                 "Found new file, but not processing because dryrun was requested"
             )
-
-
-def print_message(prefix, message: FileIdMessage | DeviceInfoMessage):
-    man = (
-        Manufacturer(message.manufacturer).name
-        if message.manufacturer in Manufacturer
-        else "BLANK"
-    )
-    gar_prod = (
-        GarminProduct(message.garmin_product)
-        if message.garmin_product in GarminProduct
-        else "BLANK"
-    )
-    # _logger.debug(
-    #     f'{prefix} - manufacturer: {message.manufacturer} ("{man}") - '
-    #     f'product: {message.product} - garmin product: {message.garmin_product} ("{gar_prod}")'
-    # )
-    _logger.debug(f"{prefix} - {message.to_row()=}\n"
-                  f"(Manufacturer: {man}, product: {message.product}, garmin_product: {gar_prod})")
-
-
-def get_date_from_fit(fit_path: Path) -> Optional[datetime]:
-    fit_file = FitFile.from_file(str(fit_path))
-    res = None
-    for i, record in enumerate(fit_file.records):
-        message = record.message
-        if message.global_id == FileIdMessage.ID:
-            if isinstance(message, FileIdMessage):
-                res = datetime.fromtimestamp(message.time_created / 1000.0)  # type: ignore
-                break
-    return res
-
-def rewrite_file_id_message(
-        m: FileIdMessage,
-        message_num: int,
-    ) -> tuple[DefinitionMessage, FileIdMessage]:
-    dt = datetime.fromtimestamp(m.time_created / 1000.0)  # type: ignore
-    _logger.info(f'Activity timestamp is "{dt.isoformat()}"')
-    print_message(f"FileIdMessage Record: {message_num}", m)
-
-    new_m = FileIdMessage()
-    new_m.time_created = (
-        m.time_created if m.time_created
-        else int(dt.now().timestamp() * 1000)
-    )
-    if m.type:
-        new_m.type = m.type
-    if m.serial_number is not None:
-        new_m.serial_number = m.serial_number
-    if m.product_name:
-        # garmin does not appear to define product_name, so don't copy it over
-        pass
-        # new_m.product_name = m.product_name
-
-    if (
-        m.manufacturer == Manufacturer.DEVELOPMENT.value or
-        m.manufacturer == Manufacturer.ZWIFT.value or
-        m.manufacturer == Manufacturer.WAHOO_FITNESS.value or
-        m.manufacturer == Manufacturer.PEAKSWARE.value or
-        m.manufacturer == Manufacturer.HAMMERHEAD.value or
-        m.manufacturer == Manufacturer.COROS.value or
-        m.manufacturer == 331  # MYWHOOSH is unknown to fit_tools
-    ):
-        new_m.manufacturer = Manufacturer.GARMIN.value
-        new_m.product = GarminProduct.EDGE_830.value
-        _logger.debug("    Modifying values")
-        print_message(f"    New Record: {message_num}", new_m)
-
-    return (DefinitionMessage.from_data_message(new_m), new_m)
-
-
-def strip_unknown_fields(fit_file: FitFile) -> None:
-    """
-    Force regeneration of definition messages for messages with unknown fields.
-
-    This fixes a bug where fit_tool skips unknown fields (like Zwift's field 193)
-    during reading but keeps them in the definition, causing a mismatch when writing.
-
-    Sets definition_message to None for affected messages, forcing FitFileBuilder
-    to regenerate clean definitions based only on fields that exist.
-
-    Modifies messages in place.
-    """
-    for record in fit_file.records:
-        message = record.message
-        if not hasattr(message, 'definition_message') or message.definition_message is None:
-            continue
-        if not hasattr(message, 'fields'):
-            continue
-
-        # Get the set of field IDs that actually exist in the message
-        existing_field_ids = {field.field_id for field in message.fields if field.is_valid()}
-
-        # Check if definition has fields that don't exist in the message
-        definition_field_ids = {
-            fd.field_id for fd in message.definition_message.field_definitions
-        }
-
-        unknown_fields = definition_field_ids - existing_field_ids
-        if unknown_fields:
-            _logger.debug(
-                f"Clearing definition for {message.name} (global_id={message.global_id}) "
-                f"to force regeneration (had {len(unknown_fields)} unknown field(s))"
-            )
-            # Set to None to force FitFileBuilder to regenerate it
-            message.definition_message = None
-
-
-def edit_fit(
-    fit_path: Path, output: Optional[Path] = None, dryrun: bool = False
-) -> Path | None:
-    if dryrun:
-        _logger.warning('In "dryrun" mode; will not actually write new file.')
-    _logger.info(f'Processing "{fit_path}"')
-    try:
-        fit_file = FitFile.from_file(str(fit_path))
-    except Exception:
-        _logger.error("File does not appear to be a FIT file, skipping...")
-        # c.print_exception(show_locals=True)
-        return None
-
-    # Strip unknown field definitions to prevent corruption when rewriting
-    strip_unknown_fields(fit_file)
-
-    if not output:
-        output = fit_path.parent / f"{fit_path.stem}_modified.fit"
-
-    builder = FitFileBuilder(auto_define=True)
-    skipped_device_type_zero = False
-
-    # Collect Activity messages to write at the end (fixes COROS file ordering)
-    from fit_tool.profile.messages.activity_message import ActivityMessage
-    activity_messages = []
-
-    # loop through records, find the one we need to change, and modify the values:
-    for i, record in enumerate(fit_file.records):
-        message = record.message
-
-        # Defer Activity messages until the end to ensure proper ordering
-        if isinstance(message, ActivityMessage):
-            activity_messages.append(message)
-            continue
-
-        # change file id to indicate file was saved by Edge 830
-        if message.global_id == FileIdMessage.ID:
-            if isinstance(message, DefinitionMessage):
-                # if this is the definition message for the FileIdMessage, skip it
-                # since we're going to write a new one
-                continue
-            if isinstance(message, FileIdMessage):
-                # rewrite the FileIdMessage and its definition and add to builder
-                def_message, message = rewrite_file_id_message(message, i)
-                builder.add(def_message)
-                builder.add(message)
-                # also add a customized FileCreatorMessage
-                message = FileCreatorMessage()
-                message.software_version = 975
-                message.hardware_version = 255
-                builder.add(DefinitionMessage.from_data_message(message))
-                builder.add(message)
-                continue
-
-        if message.global_id == FileCreatorMessage.ID:
-            # skip any existing file creator message (both definition and data)
-            continue
-
-        # change device info messages
-        if message.global_id == DeviceInfoMessage.ID:
-            if isinstance(message, DeviceInfoMessage):
-                print_message(f"DeviceInfoMessage Record: {i}", message)
-                if message.device_type == 0:
-                    _logger.debug("    Skipping device_type 0")
-                    skipped_device_type_zero = True
-                    continue
-
-                # Renumber device_index if we skipped device_type 0
-                if skipped_device_type_zero and message.device_index is not None:
-                    _logger.debug(f"    Renumbering device_index from {message.device_index} to {message.device_index - 1}")
-                    message.device_index = message.device_index - 1
-
-                if (
-                    message.manufacturer == Manufacturer.DEVELOPMENT.value or
-                    message.manufacturer == 0 or
-                    message.manufacturer == Manufacturer.WAHOO_FITNESS.value or
-                    message.manufacturer == Manufacturer.ZWIFT.value or
-                    message.manufacturer == Manufacturer.PEAKSWARE.value or
-                    message.manufacturer == Manufacturer.HAMMERHEAD.value or
-                    message.manufacturer == Manufacturer.COROS.value or
-                    message.manufacturer == 331  # MYWHOOSH is unknown to fit_tools
-                ):
-                    _logger.debug("    Modifying values")
-                    _logger.debug(f"garmin_product: {message.garmin_product}")
-                    _logger.debug(f"product: {message.product}")
-                    if message.garmin_product:
-                        message.garmin_product = GarminProduct.EDGE_830.value
-                    if message.product:
-                        message.product = GarminProduct.EDGE_830.value  # type: ignore
-                    if message.manufacturer:
-                        message.manufacturer = Manufacturer.GARMIN.value
-                    message.product_name = ""
-                    print_message(f"    New Record: {i}", message)
-
-        builder.add(message)
-
-    # Add Activity messages at the end to ensure proper FIT file structure
-    if activity_messages:
-        _logger.debug(f"Adding {len(activity_messages)} Activity message(s) at the end")
-        for activity_msg in activity_messages:
-            builder.add(activity_msg)
-
-    modified_file = builder.build()
-    if not dryrun:
-        _logger.info(f'Saving modified data to "{output}"')
-        modified_file.to_file(str(output))
-    else:
-        _logger.info(
-            f"Dryrun requested, so not saving data "
-            f'(would have written to "{output}")'
-        )
-    return output
 
 
 def upload(fn: Path, original_path: Optional[Path] = None, dryrun: bool = False):
@@ -429,7 +158,7 @@ def upload_all(dir: Path, preinitialize: bool = False, dryrun: bool = False):
 
         if not preinitialize:
             with NamedTemporaryFile(delete=True, delete_on_close=False) as fp:
-                output = edit_fit(dir.joinpath(f), output=Path(fp.name))
+                output = fit_editor.edit_fit(dir.joinpath(f), output=Path(fp.name))
                 if output:
                     _logger.info("Uploading modified file to Garmin Connect")
                     upload(output, original_path=Path(f), dryrun=dryrun)
@@ -601,7 +330,7 @@ def run():
     if p.is_file():
         # if p is a single file, do edit and upload
         _logger.debug(f'"{p}" is a single file')
-        output_path = edit_fit(p, dryrun=args.dryrun)
+        output_path = fit_editor.edit_fit(p, dryrun=args.dryrun)
         if (args.upload or args.upload_all) and output_path:
             upload(output_path, original_path=p, dryrun=args.dryrun)
     else:
@@ -615,7 +344,7 @@ def run():
             files_to_edit = list(p.glob("*.fit", case_sensitive=False))
             _logger.info(f"Found {len(files_to_edit)} FIT files to edit")
             for f in files_to_edit:
-                edit_fit(f, dryrun=args.dryrun)
+                fit_editor.edit_fit(f, dryrun=args.dryrun)
 
 def fit_crc_get16(crc: int, byte: int) -> int:
     """
