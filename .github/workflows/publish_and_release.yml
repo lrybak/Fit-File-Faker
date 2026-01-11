@@ -1,6 +1,11 @@
 name: Publish Python distribution to PyPI
 
-on: push
+on:
+  push:
+    tags:
+      - '*'
+    branches:
+      - main
 
 jobs:
   build:
@@ -14,12 +19,12 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.5.15"
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version-file: "pyproject.toml"
-      
+
       - name: Build package
         run: uv build
 
@@ -38,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/fit-file-faker 
+      url: https://pypi.org/p/fit-file-faker
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
 
@@ -93,29 +98,3 @@ jobs:
         gh release upload
         "$GITHUB_REF_NAME" dist/**
         --repo "$GITHUB_REPOSITORY"
-
-  publish-to-testpypi:
-    name: Publish Python 🐍 distribution 📦 to TestPyPI
-    if: ${{ ! startsWith(github.ref, 'refs/tags/') }}  # only publish to PyPI on tag pushes
-    needs:
-    - build
-    runs-on: ubuntu-latest
-
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/fit-file-faker
-
-    permissions:
-      id-token: write  # IMPORTANT: mandatory for trusted publishing
-
-    steps:
-    - name: Download all the dists
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-    - name: Publish distribution 📦 to TestPyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository-url: https://test.pypi.org/legacy/
-        verbose: true
