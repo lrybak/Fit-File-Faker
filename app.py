@@ -240,6 +240,43 @@ def rewrite_file_id_message(
     return (DefinitionMessage.from_data_message(new_m), new_m)
 
 
+def strip_unknown_fields(fit_file: FitFile) -> None:
+    """
+    Force regeneration of definition messages for messages with unknown fields.
+
+    This fixes a bug where fit_tool skips unknown fields (like Zwift's field 193)
+    during reading but keeps them in the definition, causing a mismatch when writing.
+
+    Sets definition_message to None for affected messages, forcing FitFileBuilder
+    to regenerate clean definitions based only on fields that exist.
+
+    Modifies messages in place.
+    """
+    for record in fit_file.records:
+        message = record.message
+        if not hasattr(message, 'definition_message') or message.definition_message is None:
+            continue
+        if not hasattr(message, 'fields'):
+            continue
+
+        # Get the set of field IDs that actually exist in the message
+        existing_field_ids = {field.field_id for field in message.fields if field.is_valid()}
+
+        # Check if definition has fields that don't exist in the message
+        definition_field_ids = {
+            fd.field_id for fd in message.definition_message.field_definitions
+        }
+
+        unknown_fields = definition_field_ids - existing_field_ids
+        if unknown_fields:
+            _logger.debug(
+                f"Clearing definition for {message.name} (global_id={message.global_id}) "
+                f"to force regeneration (had {len(unknown_fields)} unknown field(s))"
+            )
+            # Set to None to force FitFileBuilder to regenerate it
+            message.definition_message = None
+
+
 def edit_fit(
     fit_path: Path, output: Optional[Path] = None, dryrun: bool = False
 ) -> Path | None:
@@ -252,6 +289,10 @@ def edit_fit(
         _logger.error("File does not appear to be a FIT file, skipping...")
         # c.print_exception(show_locals=True)
         return None
+
+    # Strip unknown field definitions to prevent corruption when rewriting
+    strip_unknown_fields(fit_file)
+
     if not output:
         output = fit_path.parent / f"{fit_path.stem}_modified.fit"
 
@@ -281,7 +322,7 @@ def edit_fit(
                 continue
 
         if message.global_id == FileCreatorMessage.ID:
-            # skip any existing file creator message
+            # skip any existing file creator message (both definition and data)
             continue
 
         # change device info messages
