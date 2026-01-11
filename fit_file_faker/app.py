@@ -9,11 +9,8 @@ Simulates an Edge 830 device
 import argparse
 import json
 import logging
-import os
-import re
 import sys
 import time
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -21,12 +18,13 @@ from typing import Optional, cast
 
 import questionary
 import semver
-from platformdirs import PlatformDirs
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install
 from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers.polling import PollingObserver as Observer
+
+from .config import config_manager, dirs
 
 _logger = logging.getLogger("garmin")
 install()
@@ -84,26 +82,7 @@ def _lenient_get_length_from_size(base_type, size):
 Field.get_length_from_size = staticmethod(_lenient_get_length_from_size)
 
 c = Console()
-dirs = PlatformDirs("FitFileFaker", appauthor=False, ensure_exists=True)
 FILES_UPLOADED_NAME = Path(".uploaded_files.json")
-
-
-@dataclass
-class Config:
-    garmin_username: str | None = None
-    garmin_password: str | None = None
-    fitfiles_path: Path | None = None
-
-
-# set up config file and in-memory config store
-_config_file = dirs.user_config_path / ".config.json"
-_config_file.touch(exist_ok=True)
-_config_keys = ["garmin_username", "garmin_password", "fitfiles_path"]
-with _config_file.open("r") as f:
-    if _config_file.stat().st_size == 0:
-        _config = Config()
-    else:
-        _config = Config(**json.load(f))
 
 
 class FitFileLogFilter(logging.Filter):
@@ -162,65 +141,6 @@ def print_message(prefix, message: FileIdMessage | DeviceInfoMessage):
     # )
     _logger.debug(f"{prefix} - {message.to_row()=}\n"
                   f"(Manufacturer: {man}, product: {message.product}, garmin_product: {gar_prod})")
-
-
-def get_fitfiles_path(existing_path: Path | None) -> Path:
-    """
-    Will attempt to auto-find the FITFiles folder inside a TPVirtual data directory.
-
-    On OSX/Windows, TPVirtual data directory will be auto-detected. This folder can
-    be overridden using the ``TPV_DATA_PATH`` environment variable.
-    """
-    _logger.info("Getting FITFiles folder")
-
-    TPVPath = get_tpv_folder(existing_path)
-    res = [f for f in os.listdir(TPVPath) if re.search(r"\A(\w){16}\Z", f)]
-    if len(res) == 0:
-        _logger.error(
-            'Cannot find a TP Virtual User folder in "%s", please check if you have previously logged into TP Virtual',
-            TPVPath,
-        )
-        sys.exit(1)
-    elif len(res) == 1:
-        title = f'Found TP Virtual User directory at "{Path(TPVPath) / res[0]}", is this correct? '
-        option = questionary.select(title, choices=["yes", "no"]).ask()
-        if option == "no":
-            _logger.error(
-                'Failed to find correct TP Virtual User folder please manually configure "fitfiles_path" in config file: %s',
-                _config_file.absolute(),
-            )
-            sys.exit(1)
-        else:
-            option = res[0]
-    else:
-        title = "Found multiple TP Virtual User directories, please select the directory for your user: "
-        option = questionary.select(title, choices=res).ask()
-    TPV_data_path = Path(TPVPath) / option
-    _logger.info(
-        f'Found TP Virtual User directory: "{str(TPV_data_path.absolute())}", '
-        'setting "fitfiles_path" in config file'
-    )
-    return TPV_data_path / "FITFiles"
-
-
-def get_tpv_folder(default_path: Path | None) -> Path:
-    if os.environ.get("TPV_DATA_PATH", None):
-        p = str(os.environ.get("TPV_DATA_PATH"))
-        _logger.info(f'Using TPV_DATA_PATH value read from the environment: "{p}"')
-        return Path(p)
-    if sys.platform == "darwin":
-        TPVPath = os.path.expanduser("~/TPVirtual")
-    elif sys.platform == "win32":
-        TPVPath = os.path.expanduser("~/Documents/TPVirtual")
-    else:
-        _logger.warning(
-            "TrainingPeaks Virtual user folder can only be automatically detected on Windows and OSX"
-        )
-        TPVPath = questionary.path(
-            'Please enter your TrainingPeaks Virtual data folder (by default, ends with "TPVirtual"): ',
-            default=str(default_path) if default_path else "",
-        ).ask()
-    return Path(TPVPath)
 
 
 def get_date_from_fit(fit_path: Path) -> Optional[datetime]:
@@ -440,8 +360,8 @@ def upload(fn: Path, original_path: Optional[Path] = None, dryrun: bool = False)
     except (GarthException, FileNotFoundError):
         # Session is expired. You'll need to log in again
         _logger.info("Authenticating to Garmin Connect")
-        email = _config.garmin_username
-        password = _config.garmin_password
+        email = config_manager.config.garmin_username
+        password = config_manager.config.garmin_password
         if not email:
             email = questionary.text(
                 'No "garmin_username" variable set; Enter email address: '
@@ -543,80 +463,6 @@ def monitor(watch_dir: Path, dryrun: bool = False):
         observer.join()
 
 
-def config_is_valid(excluded_keys=[]) -> bool:
-    missing_vals = []
-    for k in _config_keys:
-        if (
-            not hasattr(_config, k) or getattr(_config, k) is None
-        ) and k not in excluded_keys:
-            missing_vals.append(k)
-    if missing_vals:
-        _logger.error(f"The following configuration values are missing: {missing_vals}")
-        return False
-    return True
-
-
-def build_config_file(
-    overwrite_existing_vals: bool = False,
-    rewrite_config: bool = True,
-    excluded_keys: list[str] = [],
-):
-    for k in _config_keys:
-        if (
-            getattr(_config, k) is None or overwrite_existing_vals
-        ) and k not in excluded_keys:
-            valid_input = False
-            while not valid_input:
-                try:
-                    if not hasattr(_config, k) or getattr(_config, k) is None:
-                        _logger.warning(f'Required value "{k}" not found in config')
-                    msg = f'Enter value to use for "{k}"'
-
-                    if hasattr(_config, k) and getattr(_config, k):
-                        msg += f'\nor press enter to use existing value of "{getattr(_config, k)}"'
-                        if k == "garmin_password":
-                            msg = msg.replace(getattr(_config, k), "<**hidden**>")
-
-                    if k != "fitfiles_path":
-                        if "password" in k:
-                            val = questionary.password(msg).unsafe_ask()
-                        else:
-                            val = questionary.text(msg).unsafe_ask()
-                    else:
-                        val = str(
-                            get_fitfiles_path(
-                                Path(_config.fitfiles_path).parent.parent
-                                if _config.fitfiles_path
-                                else None
-                            )
-                        )
-                    if val:
-                        valid_input = True
-                        setattr(_config, k, val)
-                    elif hasattr(_config, k) and getattr(_config, k):
-                        valid_input = True
-                        val = getattr(_config, k)
-                    else:
-                        _logger.warning(
-                            "Entered input was not valid, please try again (or press Ctrl-C to cancel)"
-                        )
-                except KeyboardInterrupt:
-                    _logger.error("User canceled input; exiting!")
-                    sys.exit(1)
-    if rewrite_config:
-        with open(_config_file, "w") as f:
-            json.dump(asdict(_config), f, indent=2)
-    config_content = json.dumps(asdict(_config), indent=2)
-    if (
-        hasattr(_config, "garmin_password")
-        and getattr(_config, "garmin_password") is not None
-    ):
-        config_content = config_content.replace(
-            cast(str, _config.garmin_password), "<**hidden**>"
-        )
-    _logger.info(f"Config file is now:\n{config_content}")
-
-
 def run():
     v = sys.version_info
     v_str = f"{v.major}.{v.minor}.{v.micro}"
@@ -691,7 +537,7 @@ def run():
             "watchdog.observers.inotify_buffer",
         ]:
             logging.getLogger(logger).setLevel(logging.INFO)
-        _logger.debug(f'Using "{_config_file}" as config file')
+        _logger.debug(f'Using "{config_manager.get_config_file_path()}" as config file')
     else:
         _logger.setLevel(logging.INFO)
         for logger in [
@@ -705,9 +551,9 @@ def run():
 
     # if initial_setup, just do config file building
     if args.initial_setup:
-        build_config_file(overwrite_existing_vals=True, rewrite_config=True)
+        config_manager.build_config_file(overwrite_existing_vals=True, rewrite_config=True)
         _logger.info(
-            f'Config file has been written to "{_config_file}", now run one of the other options to '
+            f'Config file has been written to "{config_manager.get_config_file_path()}", now run one of the other options to '
             'start editing/uploading files!'
         )
         sys.exit(0)
@@ -728,11 +574,11 @@ def run():
 
     # check configuration and prompt for values if needed
     excluded_keys = ["fitfiles_path"] if args.input_path else []
-    if not config_is_valid(excluded_keys=excluded_keys):
+    if not config_manager.is_valid(excluded_keys=excluded_keys):
         _logger.warning(
             "Config file was not valid, please fill out the following values."
         )
-        build_config_file(
+        config_manager.build_config_file(
             overwrite_existing_vals=False,
             rewrite_config=True,
             excluded_keys=excluded_keys,
@@ -742,9 +588,9 @@ def run():
         p = Path(args.input_path).absolute()
         _logger.info(f'Using path "{p}" from command line input')
     else:
-        if _config.fitfiles_path is None:
+        if config_manager.config.fitfiles_path is None:
             raise EnvironmentError
-        p = Path(_config.fitfiles_path).absolute()
+        p = Path(config_manager.config.fitfiles_path).absolute()
         _logger.info(f'Using path "{p}" from configuration file')
 
     if not p.exists():
