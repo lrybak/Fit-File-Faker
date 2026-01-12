@@ -31,6 +31,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-xdist>=3.5.0",
     "pre-commit>=4.0.0",
+    "gitlint>=0.19.1",
 ]
 docs = [
     "mkdocs>=1.6.0",
@@ -39,7 +40,7 @@ docs = [
     "mkdocstrings[python]>=0.24.0",
     "mkdocstrings-python>=1.7.0",
     "livereload>=2.7.1",
-    "click==8.2.1",  # pinned due to https://github.com/mkdocs/mkdocs/issues/4032
+    "click<=8.3.0",  # pinned due to https://github.com/mkdocs/mkdocs/issues/4032
 ]
 
 [project.urls]
@@ -100,14 +101,17 @@ body = """
 {% else %}\
     ## [Unreleased]
 {% endif %}\
-{% for group, commits in commits | group_by(attribute="group") %}
-    ### {{ group | upper_first }}
-    {% for commit in commits %}
+{% for group in ["Features", "Bug Fixes", "Performance", "Minor Features", "Refactoring", "Documentation", "Testing", "CI/CD", "Build System", "Styling", "Miscellaneous Tasks", "Reverts"] -%}
+{% set group_commits = commits | filter(attribute="group", value=group) -%}
+{% if group_commits %}
+    ### {{ group }}
+    {% for commit in group_commits %}
         - {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message }}\
 {% if commit.breaking %} [**BREAKING**]{% endif %} \
 ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/jat255/Fit-File-Faker/commit/{{ commit.id }}))
     {% endfor %}
-{% endfor %}
+{% endif -%}
+{% endfor -%}
 """
 
 # Footer template (optional)
@@ -141,6 +145,7 @@ commit_preprocessors = [
 commit_parsers = [
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
+    { message = "^minor-feat", group = "Minor Features" },
     { message = "^doc", group = "Documentation" },
     { message = "^perf", group = "Performance" },
     { message = "^refactor", group = "Refactoring" },
