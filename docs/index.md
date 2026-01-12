@@ -1,0 +1,314 @@
+# FIT File Faker
+
+<div align="center">
+  <img src="assets/logo.svg" alt="Fit File Faker Logo" width="200"
+      title="The best Google Gemini could do at generating a logo for this app :D" />
+</div>
+
+This application allows you to easily modify [FIT](https://developer.garmin.com/fit/overview/) files to make them appear to come from a Garmin device (Edge 830, currently) and upload them to Garmin Connect using the [`garth`](https://github.com/matin/garth/) library. The FIT editing is done using Stages Cycling's [`fit_tool`](https://bitbucket.org/stagescycling/python_fit_tool/src/main/) library.
+
+Additionally, it can be run in a "monitor" mode that will watch a folder for new FIT files and will automatically edit/upload them as they are produced. One potential application of this mode is to have the tool auto-start on the computer that you use for indoor training, so rides are automatically uploaded to Garmin Connect when you finish.
+
+## Overview
+
+The primary use motivation for this tool came from the fact that that [TrainingPeaks Virtual](https://www.trainingpeaks.com/virtual/) (previously *indieVelo*) does/did not support automatic uploading to [Garmin Connect](http://connect.garmin.com/). The files can be manually uploaded after the fact, but since they are not "from Garmin", they will not be used to calculate Garmin's **Training Effect**, which is used for suggested workouts and other features, especially if you have a watch or cycling computer that uses these features.
+
+By changing the FIT file to appear to come from a Garmin device, those features are enabled.
+
+!!! success "Use Cases"
+    Other users have reported using this tool to edit FIT files produced by:
+
+    - **[Zwift](https://www.zwift.com/)**: Upload to Garmin Connect so activities count towards badges and challenges
+    - **[TrainingPeaks Virtual](https://www.trainingpeaks.com/virtual/)**: Enable Garmin's Training Effect calculations
+    - **[MyWhoosh](https://mywhoosh.com/)**: Similar compatibility benefits
+    - **[Hammerhead Karoo](https://www.hammerhead.io/)**: Enhanced Garmin Connect integration
+    - **[COROS Dura](https://coros.com/dura)**: Enhanced Garmin Connect integration
+
+## Contributors
+
+- [jat255](https://github.com/jat255): Primary author
+- [benjmarshall](https://github.com/benjmarshall): bug fixes, monitor mode, and other improvements
+- [Kellett](https://github.com/Kellett): support for Zwift FIT files
+- [lrybak](https://github.com/lrybak): support for Hammerhead Karoo files
+- [dermarzel](https://github.com/dermarzel): support for MyWhoosh files
+
+## Installation
+
+!!! info "Requirements"
+    Python 3.12 or higher is required. If your system Python is older, use [pyenv](https://github.com/pyenv/pyenv) or [uv](https://docs.astral.sh/uv/) to manage locally installed versions.
+
+This tool works cross-platform on **Windows**, **macOS**, and **Linux** (primarily developed on Linux).
+
+=== "uv (Recommended)"
+
+    If you have [uv](https://docs.astral.sh/uv/guides/tools/#installing-tools) installed:
+
+    ```bash
+    uv tool install fit-file-faker
+    ```
+
+    This installs the tool and makes `fit-file-faker` available on your PATH.
+
+=== "pipx"
+
+    If you have [pipx](https://pipx.pypa.io/latest/installation/) installed:
+
+    ```bash
+    pipx install fit-file-faker
+    ```
+
+    This installs the tool and makes `fit-file-faker` available on your PATH.
+
+=== "pip"
+
+    Install manually using pip in a virtual environment:
+
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    pip install fit-file-faker
+    ```
+
+    The pip package installs a script named `fit-file-faker` that should be available on your path when the virtual environment is activated.
+
+=== "Development"
+
+    For development, clone the repo and use [uv](https://docs.astral.sh/uv/):
+
+    ```bash
+    git clone https://github.com/jat255/Fit-File-Faker.git
+    cd Fit-File-Faker
+    uv sync  # Installs all dependencies
+    ```
+
+    **Pre-commit hooks:**
+
+    The project uses [pre-commit](https://pre-commit.com/) to run code quality checks. After cloning and running `uv sync`:
+
+    ```bash
+    uv run pre-commit install
+    ```
+
+    This automatically runs `ruff check` and `ruff format` on staged files before each commit.
+
+    Run hooks manually on all files:
+
+    ```bash
+    uv run pre-commit run --all-files
+    ```
+
+## Configuration
+
+The script uses a configuration file named `.config.json` stored in your system's user config directory (as determined by the [`platformdirs`](https://github.com/tox-dev/platformdirs) library).
+
+Example configuration:
+
+```json
+{
+  "garmin_username": "username",
+  "garmin_password": "password",
+  "fitfiles_path": "C:\\Users\\username\\Documents\\TPVirtual\\0123456789ABCDEF\\FITFiles"
+}
+```
+
+!!! tip "Initial Setup"
+    The best way to create your config file is to run the interactive setup with the `-s` flag:
+
+    ```bash
+    fit-file-faker -s
+    ```
+
+    This will prompt you for:
+
+    - Garmin username
+    - Garmin password
+    - TrainingPeaks Virtual data folder (auto-detected on Windows/macOS)
+
+Example setup session:
+
+```bash
+$ fit-file-faker -s
+
+[16:02:04] WARNING  Required value "garmin_username" not found in config                                                                                                                            config.py:106
+? Enter value to use for "garmin_username" jat255
+[16:02:06] WARNING  Required value "garmin_password" not found in config                                                                                                                            config.py:106
+? Enter value to use for "garmin_password" ************
+[16:02:09] WARNING  Required value "fitfiles_path" not found in config                                                                                                                              config.py:106
+           INFO     Getting FITFiles folder                                                                                                                                                         config.py:169
+? Found TP Virtual User directory at "/Users/user/TPVirtual/1234567890abcdef", is this correct?  yes
+[16:02:17] INFO     Found TP Virtual User directory: "/Users/user/TPVirtual/1234567890abcdef", setting "fitfiles_path" in config file                                                               config.py:196
+           INFO     Config file is now:                                                                                                                                                             config.py:155
+                    {
+                      "garmin_username": "username",
+                      "garmin_password": "<**hidden**>",
+                      "fitfiles_path": "/Users/user/TPVirtual/1234567890abcdef/FITFiles"
+                    }
+           INFO     Config file has been written to "/Users/user/Library/Application Support/FitFileFaker/.config.json", now run one of the other options to start editing/uploading files!            app.py:289
+```
+
+## Usage
+
+### Command-line Options
+
+To see all available options:
+
+```bash
+fit-file-faker -h
+```
+
+```
+usage: fit-file-faker [-h] [-s] [-u] [-ua] [-p] [-m] [-d] [-v] [input_path]
+
+Tool to add Garmin device information to FIT files and upload them to Garmin Connect. Currently, only FIT files produced by TrainingPeaks Virtual (https://www.trainingpeaks.com/virtual/) and Zwift
+(https://www.zwift.com/) are supported, but it's possible others may work.
+
+positional arguments:
+  input_path           the FIT file or directory to process. This argument can be omitted if the 'fitfiles_path' config value is set (that directory will be used instead). By default, files will just be
+                       edited. Specify the "-u" flag to also upload them to Garmin Connect.
+
+options:
+  -h, --help           show this help message and exit
+  -s, --initial-setup  Use this option to interactively initialize the configuration file (.config.json)
+  -u, --upload         upload FIT file (after editing) to Garmin Connect
+  -ua, --upload-all    upload all FIT files in directory (if they are not in "already processed" list)
+  -p, --preinitialize  preinitialize the list of processed FIT files (mark all existing files in directory as already uploaded)
+  -m, --monitor        monitor a directory and upload all newly created FIT files as they are found
+  -d, --dryrun         perform a dry run, meaning any files processed will not be saved nor uploaded
+  -v, --verbose        increase verbosity of log output
+```
+
+### Basic Usage
+
+The default behavior loads a given FIT file and outputs a file named `path_to_file_modified.fit` that has been edited and can be manually imported to Garmin Connect:
+
+```bash
+fit-file-faker path_to_file.fit
+```
+
+If a directory is supplied rather than a single file, all FIT files in that directory will be processed in the same way.
+
+### Upload to Garmin Connect
+
+Supplying the `-u` option will attempt to upload the edited file to Garmin Connect. If your credentials are not stored in the configuration file, the script will prompt you for them.
+
+The OAuth credentials obtained for the Garmin web service will be stored in a directory named `.garth` in your system's user cache folder (as determined by [`platformdirs`](https://github.com/tox-dev/platformdirs)). See the `garth` library's [documentation](https://github.com/matin/garth/?tab=readme-ov-file#authentication-and-stability) for details.
+
+```bash
+fit-file-faker -u path_to_file.fit
+```
+
+Example output:
+
+```
+[12:14:06] INFO     Activity timestamp is "2024-05-21T17:15:48"                              app.py:84
+           INFO     Saving modified data to path_to_file_modified.fit                        app.py:106
+[12:14:08] INFO     ✅ Successfully uploaded "path_to_file.fit"                              app.py:137
+```
+
+### Verbose Output
+
+The `-v` flag can be used (with any of the other options) to provide more debugging output:
+
+```bash
+fit-file-faker -u path_to_file.fit -v
+```
+
+Example output:
+
+```
+[12:38:33] INFO     Activity timestamp is "2024-05-21T17:15:48"                              app.py:84
+           DEBUG    Record: 1 - manufacturer: 255 ("DEVELOPMENT") - product: 0 - garmin      app.py:55
+                    product: None ("BLANK")
+           DEBUG        Modifying values                                                     app.py:87
+           DEBUG        New Record: 1 - manufacturer: 1 ("GARMIN") - product: 3122 - garmin  app.py:55
+                    product: 3122 ("GarminProduct.EDGE_830")
+           DEBUG    Record: 14 - manufacturer: 32 ("WAHOO_FITNESS") - product: 40 - garmin   app.py:55
+                    product: None ("BLANK")
+           DEBUG        Modifying values                                                     app.py:97
+           DEBUG        New Record: 14 - manufacturer: 1 ("GARMIN") - product: 3122 - garmin app.py:55
+                    product: 3122 ("GarminProduct.EDGE_830")
+[12:38:34] DEBUG    Using stored Garmin credentials from ".garth" directory                 app.py:118
+[12:38:35] INFO     ✅ Successfully uploaded "path_to_file.fit"                             app.py:137
+```
+
+### "Upload All" and "Monitor" Modes
+
+#### Upload All
+
+The `--upload-all` option will search for all FIT files either in the directory given on the command line, or in the one specified in the `fitfiles_path` config option. The script will:
+
+1. Compare the files found to a list of files already seen (stored in that directory's `.uploaded_files.json` file)
+2. Edit them
+3. Upload each to Garmin Connect
+
+The edited files will be written into a temporary file and discarded when the script finishes running, and the filenames will be stored into a JSON file so they are skipped the next time the script is run.
+
+#### Monitor Mode
+
+The `--monitor` option automates the upload all function by watching the filesystem in the specified directory for any new FIT files. It will continue running until the user interrupts the process by pressing `ctrl-c`.
+
+Example output when a new file named `new_fit_file.fit` is detected:
+
+```bash
+$ fit-file-faker --monitor /home/user/Documents/TPVirtual/0123456789ABCEDF/FITFiles
+
+[14:03:32] INFO     Using path "/home/user/Documents/TPVirtual/                    app.py:561
+                    0123456789ABCEDF/FITFiles" from command line input
+           INFO     Monitoring directory: "/home/user/Documents/TPVirtual/         app.py:367
+                    0123456789ABCEDF/FITFiles"
+[14:03:44] INFO     New file detected - "/home/user/Documents/TPVirtual/           app.py:94
+                    0123456789ABCEDF/FITFiles/new_fit_file.fit"; sleeping for
+                    5 seconds to ensure TPV finishes writing file
+[14:03:50] INFO     Found 1 files to edit/upload                                   app.py:333
+           INFO     Processing "new_fit_file.fit"                                  app.py:340
+           INFO     Processing "/home/user/Documents/TPVirtual                     app.py:202
+                    sync/0123456789ABCEDF/FITFiles/new_fit_file.fit"
+[14:03:58] INFO     Activity timestamp is "2025-01-03T17:01:45"                    app.py:223
+[14:03:59] INFO     Saving modified data to "/tmp/tmpsn4gvpkh"                     app.py:250
+[14:04:00] INFO     Uploading modified file to Garmin Connect                      app.py:346
+[14:04:01] INFO     Uploading "/tmp/tmpsn4gvpkh" using garth                       app.py:295
+^C[14:04:46] INFO     Received keyboard interrupt, shutting down monitor           app.py:372
+```
+
+!!! warning "Pre-initializing Uploaded Files"
+    If your TrainingPeaks Virtual user data folder already contains FIT files which you have previously uploaded to Garmin Connect using a different method, you can pre-initialize the list of uploaded files to avoid any possibility of uploading duplicates.
+
+    Use the `--preinitialize` option to process a directory (defaults to the configured TrainingPeaks Virtual user data directory) and add all files to the list of previously uploaded files:
+
+    ```bash
+    fit-file-faker --preinitialize
+    ```
+
+    After this, any use of the `--upload-all` or `--monitor` options will ignore these pre-existing files.
+
+### Already Uploaded Files
+
+!!! info "Duplicate Detection"
+    If a file with the same timestamp already exists on the Garmin Connect account, Garmin will reject the upload. This script will detect that and output:
+
+    ```
+    [13:32:48] INFO     Activity timestamp is "2024-05-10T17:17:34"                              app.py:85
+               INFO     Saving modified data to "path_to_file_modified.fit"                      app.py:107
+    [13:32:49] WARNING  ❌ Received HTTP conflict (activity already exists) for                  app.py:143
+                        "path_to_file.fit"
+    ```
+
+## Troubleshooting
+
+If you run into problems, please [create an issue](https://github.com/jat255/Fit-File-Faker/issues/new/choose) on the GitHub repo.
+
+!!! note
+    As this is a side-project provided for free (as in speech and beer), support times may vary 😅.
+
+## Next Steps
+
+- Learn about the [development workflow and testing](developer-guide.md)
+- Check the [changelog](changelog.md) for recent updates
+- View the project on [GitHub](https://github.com/jat255/Fit-File-Faker)
+- Install from [PyPI](https://pypi.org/project/fit-file-faker/)
+
+## Disclaimer
+
+The use of any registered or unregistered trademarks owned by third-parties are used only for informational purposes and no endorsement of this software by the owners of such trademarks are implied, explicitly or otherwise. The terms/trademarks Garmin, indieVelo, TrainingPeaks, TrainingPeaks Virtual, Garmin Connect, Stages Cycling, MyWhoosh, Hammerhead Karoo, COROS Dura, Zwift, and any others are used under fair use doctrine solely to facilitate understanding.
+
+Likewise, the software is provided “as is”, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.

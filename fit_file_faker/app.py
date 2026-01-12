@@ -1,9 +1,27 @@
 # ruff: noqa: E402
-"""
-Takes a .fit file produced and modifies the fields so that Garmin
-will think it came from a Garmin device and use it to determine training effect.
+"""Main application module for Fit File Faker.
 
-Simulates an Edge 830 device
+This module provides the command-line interface and core application logic
+for modifying FIT files and uploading them to Garmin Connect. It simulates
+a Garmin Edge 830 device to enable Training Effect calculations for activities
+from non-Garmin sources.
+
+The module includes:
+
+- CLI argument parsing and validation
+- FIT file upload to Garmin Connect with OAuth authentication
+- Batch processing of multiple FIT files
+- Directory monitoring for automatic processing of new files
+- Rich console output with colored logs
+
+Typical usage:
+
+    $ fit-file-faker -s                    # Initial setup
+    $ fit-file-faker activity.fit          # Edit single file
+    $ fit-file-faker -u activity.fit       # Edit and upload
+    $ fit-file-faker -ua                   # Upload all new files
+    $ fit-file-faker -m                    # Monitor directory
+
 """
 
 import argparse
@@ -20,7 +38,7 @@ import semver
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install
-from watchdog.events import PatternMatchingEventHandler
+from watchdog.events import PatternMatchingEventHandler, FileCreatedEvent
 from watchdog.observers.polling import PollingObserver as Observer
 
 _logger = logging.getLogger("garmin")
@@ -49,14 +67,53 @@ FILES_UPLOADED_NAME = Path(".uploaded_files.json")
 
 
 class NewFileEventHandler(PatternMatchingEventHandler):
+    """Event handler for monitoring directory changes and processing new FIT files.
+
+    Extends watchdog's PatternMatchingEventHandler to automatically process
+    and upload new FIT files as they're created in the monitored directory.
+    Includes a 5-second delay to ensure the file is fully written before processing.
+
+    Attributes:
+        dryrun: If `True`, detects files but doesn't process them. Useful for testing.
+
+    Examples:
+        >>> # Typically used via monitor() function, but can be instantiated directly:
+        >>> from watchdog.observers.polling import PollingObserver as Observer
+        >>> handler = NewFileEventHandler(dryrun=False)
+        >>> observer = Observer()
+        >>> observer.schedule(handler, "/path/to/fitfiles", recursive=True)
+        >>> observer.start()
+    """
+
     def __init__(self, dryrun: bool = False):
+        """Initialize the file event handler.
+
+        Args:
+            dryrun: If `True`, log file detections but don't process them.
+                Defaults to `False`.
+        """
         _logger.debug(f"Creating NewFileEventHandler with {dryrun=}")
         super().__init__(
             patterns=["*.fit"], ignore_directories=True, case_sensitive=False
         )
         self.dryrun = dryrun
 
-    def on_created(self, event) -> None:
+    def on_created(self, event: FileCreatedEvent) -> None:
+        """Handle file creation events.
+
+        Called by watchdog when a new `.fit` file is created in the monitored
+        directory. Waits 5 seconds to ensure the file is fully written, then
+        processes all new files in the directory via
+        [`upload_all()`][fit_file_faker.app.upload_all].
+
+        Args:
+            event: The file system event containing the path to the new file.
+
+        Note:
+            The 5-second delay is necessary because TrainingPeaks Virtual may
+            still be writing to the file when the creation event fires. Without
+            this delay, the file might be incomplete or corrupt.
+        """
         _logger.info(
             f'New file detected - "{event.src_path}"; sleeping for 5 seconds '
             "to ensure TPV finishes writing file"
@@ -77,6 +134,36 @@ class NewFileEventHandler(PatternMatchingEventHandler):
 
 
 def upload(fn: Path, original_path: Optional[Path] = None, dryrun: bool = False):
+    """Upload a FIT file to Garmin Connect.
+
+    Authenticates to Garmin Connect using stored credentials or interactive prompts,
+    then uploads the specified FIT file. Credentials are cached in a platform-specific
+    cache directory for future use.
+
+    Args:
+        fn: Path to the (modified) FIT file to upload.
+        original_path: Optional path to the original file for logging purposes.
+            Defaults to `None`.
+        dryrun: If `True`, authenticates but doesn't actually upload the file.
+            Defaults to `False`.
+
+    Raises:
+        GarthHTTPError: If upload fails with an HTTP error. 409 (conflict/duplicate)
+            errors are caught and logged as warnings, but other HTTP errors are re-raised.
+
+    Examples:
+        >>> from pathlib import Path
+        >>> # Upload a modified file
+        >>> upload(Path("activity_modified.fit"))
+        >>>
+        >>> # Dry run (authenticate but don't upload)
+        >>> upload(Path("activity_modified.fit"), dryrun=True)
+
+    Note:
+        Garmin Connect credentials are read from the configuration file. If not
+        found there, the user is prompted interactively. Credentials are cached
+        in ~/.cache/FitFileFaker/.garth (location varies by platform).
+    """
     # get credentials and login if needed
     import garth
     from garth.exc import GarthException, GarthHTTPError
@@ -129,6 +216,37 @@ def upload(fn: Path, original_path: Optional[Path] = None, dryrun: bool = False)
 
 
 def upload_all(dir: Path, preinitialize: bool = False, dryrun: bool = False):
+    """Batch process and upload all new FIT files in a directory.
+
+    Scans the directory for FIT files that haven't been processed yet, edits them
+    to appear as Garmin Edge 830 files, and uploads them to Garmin Connect. Maintains
+    a `.uploaded_files.json` file to track which files have been processed.
+
+    Args:
+        dir: Path to the directory containing FIT files to process.
+        preinitialize: If `True`, marks all existing files as already uploaded
+            without actually processing them. Useful for initializing the tracking
+            file. Defaults to `False`.
+        dryrun: If `True`, processes files but doesn't upload or update the tracking
+            file. Defaults to `False`.
+
+    Note:
+        Files ending in "_modified.fit" are automatically excluded to avoid
+        re-processing previously modified files. Temporary files are used for
+        uploads and are automatically deleted afterwards.
+
+    Examples:
+        >>> from pathlib import Path
+        >>>
+        >>> # Process and upload all new files
+        >>> upload_all(Path("/home/user/TPVirtual/abc123/FITFiles"))
+        >>>
+        >>> # Initialize tracking without processing
+        >>> upload_all(Path("/path/to/fitfiles"), preinitialize=True)
+        >>>
+        >>> # Dry run (no uploads or tracking updates)
+        >>> upload_all(Path("/path/to/fitfiles"), dryrun=True)
+    """
     files_uploaded = dir.joinpath(FILES_UPLOADED_NAME)
     if files_uploaded.exists():
         # load uploaded file list from disk
@@ -178,6 +296,32 @@ def upload_all(dir: Path, preinitialize: bool = False, dryrun: bool = False):
 
 
 def monitor(watch_dir: Path, dryrun: bool = False):
+    """Monitor a directory for new FIT files and automatically process them.
+
+    Uses watchdog's PollingObserver to watch for new .fit files in the specified
+    directory. When a new file is detected, waits 5 seconds to ensure it's fully
+    written, then processes and uploads it via [`upload_all()`][fit_file_faker.app.upload_all].
+
+    The monitor runs until interrupted by Ctrl-C (`KeyboardInterrupt`).
+
+    Args:
+        watch_dir: Path to the directory to monitor.
+        dryrun: If `True`, detects new files but doesn't process them.
+            Defaults to `False`.
+
+    Examples:
+        >>> from pathlib import Path
+        >>>
+        >>> # Monitor a directory
+        >>> monitor(Path("/home/user/TPVirtual/abc123/FITFiles"))
+        Monitoring directory: "/home/user/TPVirtual/abc123/FITFiles"
+        # Press Ctrl-C to stop
+
+    Note:
+        Uses `PollingObserver` for cross-platform compatibility. This may be
+        less efficient than platform-specific observers but works consistently
+        across macOS, Windows, and Linux.
+    """
     event_handler = NewFileEventHandler(dryrun=dryrun)
     observer = Observer()
     observer.schedule(event_handler, str(watch_dir.absolute()), recursive=True)
@@ -196,6 +340,38 @@ def monitor(watch_dir: Path, dryrun: bool = False):
 
 
 def run():
+    """Main entry point for the fit-file-faker command-line application.
+
+    Parses command-line arguments, validates configuration, and executes the
+    appropriate operation (edit, upload, batch upload, or monitor). This function
+    is registered as the console script entry point in pyproject.toml.
+
+    Command-line options:
+
+        -s, --initial-setup: Interactive configuration setup
+        -u, --upload: Upload file after editing
+        -ua, --upload-all: Batch upload all new files
+        -p, --preinitialize: Mark all existing files as already uploaded
+        -m, --monitor: Monitor directory for new files
+        -d, --dryrun: Perform dry run (no file writes or uploads)
+        -v, --verbose: Enable verbose debug logging
+
+    Raises:
+        SystemExit: If configuration is invalid, required arguments are missing,
+            or conflicting arguments are provided.
+
+    Examples:
+
+        # run() is called automatically when running the installed command:
+        $ fit-file-faker -s
+        $ fit-file-faker -u activity.fit
+        $ fit-file-faker -ua
+        $ fit-file-faker -m
+
+    Note:
+        Requires Python 3.12 or higher. Exits with error if Python version
+        requirement is not met.
+    """
     v = sys.version_info
     v_str = f"{v.major}.{v.minor}.{v.micro}"
     min_ver = "3.12.0"

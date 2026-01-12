@@ -1,5 +1,7 @@
 # Fit File Faker - a FIT File editor and uploader
 
+[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue)](https://jat255.github.io/Fit-File-Faker/)
+
 This repo contains a tool that will edit [FIT](https://developer.garmin.com/fit/overview/) files
 to make them appear to come from a Garmin device (Edge 830, currently) and upload them to Garmin Connect
 using the [`garth`](https://github.com/matin/garth/) library. The FIT editing

@@ -29,12 +29,12 @@ def verify_garmin_device_info(fit_file_path: Path):
         message = record.message
         if isinstance(message, FileIdMessage):
             file_id_found = True
-            assert (
-                message.manufacturer == Manufacturer.GARMIN.value
-            ), f"Expected manufacturer GARMIN but got {message.manufacturer}"
-            assert (
-                message.product == GarminProduct.EDGE_830.value
-            ), f"Expected product EDGE_830 but got {message.product}"
+            assert message.manufacturer == Manufacturer.GARMIN.value, (
+                f"Expected manufacturer GARMIN but got {message.manufacturer}"
+            )
+            assert message.product == GarminProduct.EDGE_830.value, (
+                f"Expected product EDGE_830 but got {message.product}"
+            )
             break
 
     assert file_id_found, "FileIdMessage not found in modified file"

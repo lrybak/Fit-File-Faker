@@ -4,7 +4,6 @@
 .venv
 .vscode
 .uploaded_files.json
-*.fit
 .config.json
 *.egg-info
 dist
@@ -18,3 +17,6 @@ TODO.txt
 htmlcov/
 coverage.xml
 .pytest_cache/
+
+# built documentation
+site

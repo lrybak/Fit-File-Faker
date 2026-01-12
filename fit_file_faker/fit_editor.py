@@ -1,8 +1,18 @@
-"""
-FIT file editing functionality for Fit File Faker.
+"""FIT file editing functionality for Fit File Faker.
 
 This module handles the core FIT file manipulation logic, converting files
 from virtual cycling platforms to appear as Garmin Edge 830 recordings.
+
+The primary class, FitEditor, provides methods to read FIT files, modify
+device metadata (manufacturer and product IDs), and save the modified files
+while preserving all activity data (records, laps, sessions).
+
+Typical usage example:
+    >>> from fit_file_faker.fit_editor import fit_editor
+    >>> from pathlib import Path
+    >>>
+    >>> output_file = fit_editor.edit_fit(Path("activity.fit"))
+    >>> print(f"Modified file saved to: {output_file}")
 """
 
 import logging
@@ -23,24 +33,84 @@ _logger = logging.getLogger("garmin")
 
 
 class FitFileLogFilter(logging.Filter):
-    """Filter to remove specific warning from the fit_tool module"""
+    """Logging filter to suppress noisy fit_tool warnings.
 
-    def filter(self, record):
+    This filter removes log messages from the fit_tool library that contain
+    "\\n\\tactual: " which are verbose field validation warnings that clutter
+    the output without providing useful information for end users.
+
+    The filter is automatically applied to the fit_tool logger when a
+    FitEditor instance is created.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Determine if the specified record should be logged.
+
+        Args:
+            record: The log record to filter.
+
+        Returns:
+            True if the record should be logged (doesn't contain the
+            filtered pattern), False otherwise.
+        """
         res = "\n\tactual: " not in record.getMessage()
         return res
 
 
 class FitEditor:
-    """Handles FIT file editing and manipulation."""
+    """Handles FIT file editing and manipulation.
+
+    This class provides methods to read, modify, and save FIT files from
+    various cycling platforms (TrainingPeaks Virtual, Zwift, COROS, etc.),
+    converting them to appear as if they came from a Garmin Edge 830 device.
+
+    The editor modifies only device metadata (manufacturer, product IDs) while
+    preserving all activity data including records, laps, and sessions. This
+    enables Garmin Connect's Training Effect calculations for activities from
+    non-Garmin sources.
+
+    Examples:
+        >>> from fit_file_faker.fit_editor import fit_editor
+        >>> from pathlib import Path
+        >>>
+        >>> # Edit a single file
+        >>> output = fit_editor.edit_fit(Path("activity.fit"))
+        >>>
+        >>> # Dry run mode (no file written)
+        >>> output = fit_editor.edit_fit(Path("activity.fit"), dryrun=True)
+        >>>
+        >>> # Custom output location
+        >>> output = fit_editor.edit_fit(
+        ...     Path("activity.fit"),
+        ...     output=Path("modified_activity.fit")
+        ... )
+    """
 
     def __init__(self):
+        """Initialize the FIT editor.
+
+        Applies a logging filter to suppress verbose fit_tool warnings.
+        """
         # Apply the log filter to suppress noisy fit_tool warnings
         logging.getLogger("fit_tool").addFilter(FitFileLogFilter())
 
     def print_message(
         self, prefix: str, message: FileIdMessage | DeviceInfoMessage
     ) -> None:
-        """Print debug information about FIT file messages."""
+        """Print debug information about FIT file messages.
+
+        Logs detailed information about FileIdMessage or DeviceInfoMessage
+        records, including manufacturer names, product IDs, and garmin_product
+        values. This is only logged at DEBUG level for troubleshooting.
+
+        Args:
+            prefix: Descriptive prefix for the log message (e.g., "FileIdMessage Record: 1").
+            message: The FIT message to log information about.
+
+        Note:
+            This method is primarily used for debugging and troubleshooting
+            FIT file modifications.
+        """
         man = (
             Manufacturer(message.manufacturer).name
             if message.manufacturer in Manufacturer
@@ -57,7 +127,22 @@ class FitEditor:
         )
 
     def get_date_from_fit(self, fit_path: Path) -> Optional[datetime]:
-        """Extract the creation date from a FIT file."""
+        """Extract the creation date from a FIT file.
+
+        Reads the FIT file and extracts the timestamp from the `FileIdMessage`,
+        which indicates when the activity was recorded.
+
+        Args:
+            fit_path: `Path` to the FIT file to read.
+
+        Returns:
+            The activity creation datetime, or `None` if no `FileIdMessage` with
+            a valid timestamp was found.
+
+        Note:
+            The timestamp in FIT files is stored in milliseconds since the
+            FIT epoch, which is converted to a standard Python datetime object.
+        """
         fit_file = FitFile.from_file(str(fit_path))
         res = None
         for i, record in enumerate(fit_file.records):
@@ -73,7 +158,29 @@ class FitEditor:
         m: FileIdMessage,
         message_num: int,
     ) -> tuple[DefinitionMessage, FileIdMessage]:
-        """Rewrite FileIdMessage to appear as if from Garmin Edge 830."""
+        """Rewrite FileIdMessage to appear as if from Garmin Edge 830.
+
+        Creates a new FileIdMessage with Garmin Edge 830 manufacturer and
+        product IDs while preserving the original timestamp, type, and serial
+        number. This is the primary transformation that enables Garmin Connect
+        to recognize and process the activity.
+
+        Args:
+            m: The original FileIdMessage to rewrite.
+            message_num: The record number for logging purposes.
+
+        Returns:
+            A tuple containing:
+
+                - `DefinitionMessage`: Auto-generated definition for the new message.
+                - `FileIdMessage`: The rewritten message with Garmin Edge 830 metadata.
+
+        Note:
+            The product_name field is intentionally not copied as Garmin devices
+            typically don't set this field. Only files from supported manufacturers
+            (`DEVELOPMENT`, `ZWIFT`, `WAHOO_FITNESS`, `PEAKSWARE`, `HAMMERHEAD`, `COROS`,
+            `MYWHOOSH`) are modified; others are returned unchanged.
+        """
         dt = datetime.fromtimestamp(m.time_created / 1000.0)  # type: ignore
         _logger.info(f'Activity timestamp is "{dt.isoformat()}"')
         self.print_message(f"FileIdMessage Record: {message_num}", m)
@@ -99,7 +206,23 @@ class FitEditor:
         return (DefinitionMessage.from_data_message(new_m), new_m)
 
     def _should_modify_manufacturer(self, manufacturer: int | None) -> bool:
-        """Check if manufacturer should be modified to Garmin."""
+        """Check if manufacturer should be modified to Garmin.
+
+        Determines whether a FIT file's manufacturer should be changed to
+        Garmin based on whether it's from a supported virtual cycling platform.
+
+        Args:
+            manufacturer: The manufacturer code from the FIT file, or `None`.
+
+        Returns:
+            True if the manufacturer is from a supported platform and should
+            be modified, False otherwise.
+
+        Note:
+            Supported manufacturers include: `DEVELOPMENT` (TrainingPeaks Virtual),
+            `ZWIFT`, `WAHOO_FITNESS`, `PEAKSWARE`, `HAMMERHEAD`, `COROS`, and
+            `MYWHOOSH` (`331`).
+        """
         if manufacturer is None:
             return False
         return manufacturer in [
@@ -113,7 +236,23 @@ class FitEditor:
         ]
 
     def _should_modify_device_info(self, manufacturer: int | None) -> bool:
-        """Check if device info should be modified to Garmin Edge 830."""
+        """Check if device info should be modified to Garmin Edge 830.
+
+        Similar to _should_modify_manufacturer but also includes blank/unknown
+        manufacturers (code 0) for `DeviceInfoMessage` records.
+
+        Args:
+            manufacturer: The manufacturer code from the `DeviceInfoMessage`, or `None`.
+
+        Returns:
+            True if the device info should be modified to Garmin Edge 830,
+            False otherwise.
+
+        Note:
+            This includes all manufacturers from
+            [`_should_modify_manufacturer()`][fit_file_faker.fit_editor.FitEditor._should_modify_manufacturer]
+            plus manufacturer code 0 (blank/unknown).
+        """
         if manufacturer is None:
             return False
         return manufacturer in [
@@ -128,16 +267,24 @@ class FitEditor:
         ]
 
     def strip_unknown_fields(self, fit_file: FitFile) -> None:
-        """
-        Force regeneration of definition messages for messages with unknown fields.
+        """Force regeneration of definition messages for messages with unknown fields.
 
-        This fixes a bug where fit_tool skips unknown fields (like Zwift's field 193)
+        This fixes a bug where `fit_tool` skips unknown fields (like Zwift's field 193)
         during reading but keeps them in the definition, causing a mismatch when writing.
+        Without this fix, the file would be corrupted when written back out.
 
-        Sets definition_message to None for affected messages, forcing FitFileBuilder
-        to regenerate clean definitions based only on fields that exist.
+        The method sets `definition_message` to `None` for affected messages, forcing
+        `FitFileBuilder` to regenerate clean definitions based only on fields that
+        actually exist in the message.
 
-        Modifies messages in place.
+        Args:
+            fit_file: The parsed FIT file to process. Messages are modified in place.
+
+        Note:
+            This is called automatically by
+            [`edit_fit()`][fit_file_faker.fit_editor.FitEditor.edit_fit] before
+            processing any FIT file. It's essential for handling files from platforms
+            like Zwift that use custom/unknown field IDs.
         """
         for record in fit_file.records:
             message = record.message
@@ -174,17 +321,56 @@ class FitEditor:
         output: Optional[Path] = None,
         dryrun: bool = False,
     ) -> Path | None:
-        """
-        Edit a FIT file to appear as if it came from a Garmin Edge 830.
+        """Edit a FIT file to appear as if it came from a Garmin Edge 830.
+
+        This is the primary method for converting FIT files from virtual cycling
+        platforms to Garmin-compatible format. It modifies device metadata
+        (manufacturer and product IDs) while preserving all activity data.
+
+        The method performs the following transformations:
+
+        1. Strips unknown field definitions to prevent corruption
+        2. Rewrites `FileIdMessage` with Garmin Edge 830 metadata
+        3. Adds a `FileCreatorMessage` with Edge 830 software/hardware versions
+        4. Modifies `DeviceInfoMessage` records to match Edge 830
+        5. Reorders `Activity` messages to end of file (COROS compatibility)
 
         Args:
-            fit_input: Path to the input FIT file OR a parsed FitFile object
-            output: Optional output path (defaults to {original}_modified.fit). Required if fit_input
-                    is a FitFile object rather than a Path
-            dryrun: If True, don't actually write the file
+            fit_input: Either a `Path` to the input FIT file OR a pre-parsed
+                `FitFile` object. Using a `Path` is recommended for most cases.
+            output: Optional output path. Defaults to {original}_modified.fit
+                when `fit_input` is a `Path`. Required if `fit_input` is a `FitFile`
+                object.
+            dryrun: If `True`, performs all processing but doesn't write the
+                output file. Useful for validation and testing.
 
         Returns:
-            Path to the output file, or None if processing failed
+            Path to the output file if successful, or `None` if processing
+            failed (e.g., invalid FIT file).
+
+        Raises:
+            None: Errors are logged but not raised. Returns `None` on failure.
+
+        Examples:
+            >>> from pathlib import Path
+            >>> from fit_file_faker.fit_editor import fit_editor
+            >>>
+            >>> # Basic usage
+            >>> output = fit_editor.edit_fit(Path("activity.fit"))
+            >>> print(f"Modified file: {output}")
+            >>>
+            >>> # Custom output path
+            >>> output = fit_editor.edit_fit(
+            ...     Path("activity.fit"),
+            ...     output=Path("custom_output.fit")
+            ... )
+            >>>
+            >>> # Dry run (no file written)
+            >>> output = fit_editor.edit_fit(Path("activity.fit"), dryrun=True)
+
+        Note:
+            Only modifies device metadata. All activity data (records, laps,
+            sessions, heart rate, power, etc.) is preserved exactly as-is.
         """
         if dryrun:
             _logger.warning('In "dryrun" mode; will not actually write new file.')

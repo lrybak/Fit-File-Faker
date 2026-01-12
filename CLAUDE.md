@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Fit File Faker is a Python tool that modifies FIT (Flexible and Interoperable Data Transfer) files to make them appear as if they came from a Garmin Edge 830 device. The primary use case is enabling Garmin Connect's "Training Effect" calculations for activities from non-Garmin sources like TrainingPeaks Virtual (formerly indieVelo), Zwift, and other cycling platforms.
 
-The tool is distributed as a single-file Python application (`app.py`) packaged via PyPI as `fit-file-faker`.
+The tool is distributed as a Python package via PyPI as `fit-file-faker`.
 
 ## Commands
 
@@ -63,58 +63,77 @@ ruff format .
 
 ## Architecture
 
-### Single-File Design
-The entire application is contained in `app.py` (~669 lines). This is intentional and should be preserved. The monolithic structure simplifies distribution and installation via PyPI.
+### Package Structure
+The application is organized as a modular Python package (`fit_file_faker/`) with ~998 total lines across five files:
+
+```
+fit_file_faker/
+├── __init__.py           # Package initialization (1 line)
+├── app.py                # Main application, CLI, uploads, monitoring (356 lines)
+├── config.py             # Configuration management (225 lines)
+├── fit_editor.py         # FIT file editing core logic (313 lines)
+└── utils.py              # Utility functions and monkey patches (103 lines)
+```
+
+**Entry Point**: `fit_file_faker.app:run` (defined in `pyproject.toml`)
 
 ### Core Workflow
 1. **Read FIT file**: Uses the `fit_tool` library to parse binary FIT files
-2. **Identify device messages**: Locates `FileIdMessage`, `FileCreatorMessage`, and `DeviceInfoMessage` records
-3. **Rewrite manufacturer/product IDs**: Changes manufacturer codes from DEVELOPMENT (255), ZWIFT, WAHOO_FITNESS, PEAKSWARE, HAMMERHEAD, or MYWHOOSH (331) to GARMIN (1) with Edge 830 product ID (3122)
-4. **Rebuild FIT file**: Uses `FitFileBuilder` to reconstruct the file with modified messages
-5. **Upload (optional)**: Authenticates to Garmin Connect via `garth` library and uploads the modified file
+2. **Apply fit_tool patch**: Applies monkey patch from `utils.py` to handle malformed FIT files (e.g., COROS)
+3. **Identify device messages**: Locates `FileIdMessage`, `FileCreatorMessage`, and `DeviceInfoMessage` records
+4. **Rewrite manufacturer/product IDs**: Changes manufacturer codes from DEVELOPMENT (255), ZWIFT, WAHOO_FITNESS, PEAKSWARE, HAMMERHEAD, COROS, or MYWHOOSH (331) to GARMIN (1) with Edge 830 product ID (3122)
+5. **Rebuild FIT file**: Uses `FitFileBuilder` to reconstruct the file with modified messages
+6. **Upload (optional)**: Authenticates to Garmin Connect via `garth` library and uploads the modified file
 
-### Key Components
+### Module Breakdown
 
-**Configuration (`Config` dataclass)**
-- Stored in platform-specific user config directory (via `platformdirs`)
-- Contains: `garmin_username`, `garmin_password`, `fitfiles_path`
-- Persisted as `.config.json`
+**`config.py` - Configuration Management**
+- `Config` dataclass: Holds `garmin_username`, `garmin_password`, `fitfiles_path`
+- `ConfigManager`: Handles config file I/O, validation, and interactive building
+- Stored in platform-specific user config directory (via `platformdirs`) as `.config.json`
+- `get_fitfiles_path()`: Auto-detects TrainingPeaks Virtual directories
+- `get_tpv_folder()`: Platform-specific TPV directory detection
 
-**FIT File Processing**
+**`fit_editor.py` - FIT File Editing**
+- `FitEditor` class: Main editor with logging filter for fit_tool warnings
 - `edit_fit()`: Main function that reads, modifies, and saves FIT files
-- `rewrite_file_id_message()`: Converts FileIdMessage to Garmin format
+- `rewrite_file_id_message()`: Converts FileIdMessage to Garmin Edge 830 format
+- `strip_unknown_fields()`: Handles unknown field definitions to prevent file corruption
 - Device info messages are similarly rewritten to Garmin Edge 830
 - Preserves activity data (records, laps, sessions) - only modifies device metadata
+- Special handling for Activity messages (reordered to end for COROS compatibility)
 
-**Upload Mechanism**
-- Uses `garth` library for Garmin Connect OAuth authentication
+**`app.py` - Main Application**
+- CLI argument parsing and validation
+- `upload()`: Garmin Connect upload with OAuth authentication via `garth`
+- `upload_all()`: Batch processes all FIT files in a directory
+- `monitor()`: Watches directory for new FIT files using `watchdog`
+- `NewFileEventHandler`: Event handler for monitoring mode
 - Credentials cached in platform-specific cache directory (`.garth` folder)
 - Handles HTTP 409 conflicts (duplicate activities) gracefully
-
-**Batch Processing**
-- `upload_all()`: Processes all FIT files in a directory
 - Maintains `.uploaded_files.json` to track processed files
-- Creates temporary files for uploads (discarded after upload)
 
-**Monitor Mode**
-- Uses `watchdog` library with `PollingObserver`
-- Watches for new `.fit` files in configured directory
-- 5-second delay after file creation to ensure write completion (TrainingPeaks Virtual may still be writing)
-- Automatically processes and uploads new files
+**`utils.py` - Utility Functions**
+- `apply_fit_tool_patch()`: Monkey patches fit_tool to handle malformed FIT files
+- `_lenient_get_length_from_size()`: Lenient field size validation (truncates instead of raising)
+- `fit_crc_get16()`: FIT file CRC-16 checksum calculation
+- Required for COROS and other manufacturers with non-standard FIT files
 
 ### Supported Source Platforms
 The tool recognizes and modifies FIT files from:
-- TrainingPeaks Virtual (manufacturer: DEVELOPMENT or PEAKSWARE)
+- TrainingPeaks Virtual (manufacturer: DEVELOPMENT or PEAKSWARE) - Formerly indieVelo
 - Zwift (manufacturer: ZWIFT)
 - Wahoo devices (manufacturer: WAHOO_FITNESS)
 - Hammerhead Karoo (manufacturer: HAMMERHEAD)
 - MyWhoosh (manufacturer code: 331, not in fit_tool's enum)
+- COROS (manufacturer: COROS) - Requires fit_tool patch for malformed fields
 
 ### Logging and Output
-- Uses `rich` library for formatted console output
+- Uses `rich` library for formatted console output (configured in `app.py`)
 - `RichHandler` for colored, timestamped logs
-- Custom `FitFileLogFilter` to suppress fit_tool's "actual:" warnings
+- Custom `FitFileLogFilter` in `fit_editor.py` to suppress fit_tool's "actual:" warnings
 - Debug mode (`-v`) provides detailed message-by-message processing logs
+- Separate loggers for different modules (urllib3, oauth1_auth, watchdog, etc.)
 
 ## Important Implementation Notes
 
@@ -142,15 +161,125 @@ The tool auto-detects TrainingPeaks Virtual user directories on:
 
 Override with `TPV_DATA_PATH` environment variable.
 
+## Documentation
+
+The project has a comprehensive documentation site built with MkDocs Material and hosted on GitHub Pages.
+
+### Documentation Structure
+
+```
+docs/
+├── index.md              # Home page (user guide, from README.md)
+├── developer-guide.md    # Developer guide (testing, architecture)
+├── changelog.md          # Auto-generated changelog
+└── assets/               # Images, custom CSS
+```
+
+### Documentation Site
+
+- **URL**: https://jat255.github.io/Fit-File-Faker/
+- **Framework**: MkDocs with Material theme
+- **Deployment**: Automated via GitHub Actions to gh-pages branch
+- **Changelog**: Auto-generated from git commits using git-cliff
+
+### Building Documentation Locally
+
+```bash
+# Install docs dependencies
+uv sync --group docs
+
+# Serve documentation locally (http://127.0.0.1:8000)
+mkdocs serve
+
+# Build static site
+mkdocs build
+
+# Deploy to GitHub Pages (requires push access)
+mkdocs gh-deploy
+```
+
+### Documentation Automation
+
+Documentation automatically rebuilds and deploys:
+1. On push to main when `docs/`, `mkdocs.yml`, or `pyproject.toml` changes (via `.github/workflows/docs.yml`)
+2. On release (after creating GitHub Release, via `.github/workflows/publish_and_release.yml`)
+
+The changelog is automatically generated from conventional commits and updated on each release.
+
 ## Testing Strategy
 
-The CI pipeline (`.github/workflows/install.yml`) tests on:
-- Python 3.12 and 3.13
-- Ubuntu, macOS, Windows
+### Test Suite Structure
 
-The test is minimal: install the package and run `fit-file-faker -h`. There are no unit tests currently.
+The test suite is organized into four test files covering all modules:
 
-When making changes, manually test with real FIT files from supported platforms. The `-d` (dryrun) flag is useful for testing without creating files or uploading.
+```
+tests/
+├── conftest.py              # Shared fixtures and test configuration
+├── test_fit_editor.py       # FIT editing tests (15 tests)
+├── test_config.py           # Configuration tests (21 tests, 100% coverage)
+├── test_app.py              # Application and upload tests (32 tests, 100% coverage)
+├── test_utils.py            # Utility function tests (~29 lines)
+└── files/                   # Test FIT files from various platforms
+    ├── tpv_20250111.fit
+    ├── tpv_20251120.fit
+    ├── zwift_20250401.fit
+    ├── mywhoosh_20260111.fit
+    ├── karoo_20251119.fit
+    └── coros_20251118.fit
+```
+
+**Total**: 53+ tests with **100% code coverage** for `config.py` and `app.py`.
+
+### Running Tests
+
+```bash
+# Run all tests
+python3 run_tests.py
+
+# With coverage report (HTML)
+python3 run_tests.py --html
+
+# Verbose output
+python3 run_tests.py -v
+
+# Using pytest directly
+uv run pytest tests/
+```
+
+### Continuous Integration
+
+The CI pipeline (`.github/workflows/test.yml`) tests on:
+- **Python versions**: 3.12, 3.13, 3.14
+- **Operating systems**: Ubuntu, macOS, Windows
+- **Triggers**: Push to main/develop/refactor branches, pull requests
+
+Coverage reports are uploaded to Codecov on successful Ubuntu + Python 3.12 runs.
+
+### Test Features
+
+- ✅ **Complete isolation**: All tests use temporary directories (no real config touched)
+- ✅ **Mocked services**: Garmin Connect (`garth`) and user prompts (`questionary`)
+- ✅ **Shared fixtures**: `conftest.py` provides reusable fixtures to reduce duplication
+- ✅ **Platform coverage**: Tests run on all supported platforms (TPV, Zwift, MyWhoosh, Karoo, COROS)
+
+See `TESTING.md` for comprehensive documentation.
+
+### Development Workflow
+
+**IMPORTANT: Commit Message Format**
+
+ALL commits MUST follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
+- Format: `<type>: <description>` (e.g., `feat: add new feature`, `fix: resolve bug`)
+- Allowed types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`, `build`, `perf`, `style`, `revert`
+- This is enforced by pre-commit hooks (gitlint) and required for automatic changelog generation
+- **Never** create commits that don't follow this format
+
+When making changes:
+1. Run tests locally: `python3 run_tests.py --html`
+2. Check coverage report in `htmlcov/index.html`
+3. Use the `-d` (dryrun) flag for manual testing without creating files or uploading
+4. Run linting: `ruff check . && ruff format .`
+5. **Ensure all commits follow conventional commit format** (enforced by pre-commit hooks)
 
 ## Release Process
 
