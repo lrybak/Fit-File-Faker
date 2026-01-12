@@ -460,6 +460,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/) for automati
 **Allowed types**:
 
 - `feat:` New features
+- `minor-feat:` New minor features
 - `fix:` Bug fixes
 - `docs:` Documentation changes
 - `test:` Test additions or modifications
@@ -721,6 +722,7 @@ For commits to appear in the changelog, they must follow the [Conventional Commi
 **Types**:
 
 - `feat:` - New features
+- `minor-feat:` - New minor features
 - `fix:` - Bug fixes
 - `docs:` - Documentation changes
 - `test:` - Test additions or modifications

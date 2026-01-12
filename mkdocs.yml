@@ -89,4 +89,7 @@ extra:
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/fit-file-faker/
 
+extra_css:
+  - assets/custom.css
+
 copyright: Copyright &copy; 2024 - 2026 Josh Taillon

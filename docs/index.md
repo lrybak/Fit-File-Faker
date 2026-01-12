@@ -1,17 +1,27 @@
 # FIT File Faker
 
-<div align="center">
-  <img src="assets/logo.svg" alt="Fit File Faker Logo" width="200"
-      title="The best Google Gemini could do at generating a logo for this app :D" />
+<div align="center" markdown="1">
+
+<img src="assets/logo.svg" alt="Fit File Faker Logo" width="400" title="FIT File Faker" />
+
+[![PyPI](https://img.shields.io/pypi/v/fit-file-faker?style=flat-square)](https://pypi.org/project/fit-file-faker/)
+[![License](https://img.shields.io/github/license/jat255/Fit-File-Faker?style=flat-square)](https://github.com/jat255/Fit-File-Faker/blob/main/LICENSE.md)
+[![Tests](https://img.shields.io/github/actions/workflow/status/jat255/Fit-File-Faker/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/jat255/Fit-File-Faker/actions/workflows/test.yml)
+[![Codecov](https://img.shields.io/codecov/c/github/jat255/fit-file-faker/refactor?style=flat-square&logo=codecov)](https://codecov.io/gh/jat255/fit-file-faker)
+[![Ko-fi](https://img.shields.io/badge/-Donate-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white&labelColor=555)](https://ko-fi.com/josh851356)
+
 </div>
 
 This application allows you to easily modify [FIT](https://developer.garmin.com/fit/overview/) files to make them appear to come from a Garmin device (Edge 830, currently) and upload them to Garmin Connect using the [`garth`](https://github.com/matin/garth/) library. The FIT editing is done using Stages Cycling's [`fit_tool`](https://bitbucket.org/stagescycling/python_fit_tool/src/main/) library.
+
+!!! support "Support This Project"
+    If FIT File Faker saves you time or enhances your training workflow, consider [buying me a coffee ☕](https://ko-fi.com/josh851356). Your support helps maintain and improve this project!
 
 Additionally, it can be run in a "monitor" mode that will watch a folder for new FIT files and will automatically edit/upload them as they are produced. One potential application of this mode is to have the tool auto-start on the computer that you use for indoor training, so rides are automatically uploaded to Garmin Connect when you finish.
 
 ## Overview
 
-The primary use motivation for this tool came from the fact that that [TrainingPeaks Virtual](https://www.trainingpeaks.com/virtual/) (previously *indieVelo*) does/did not support automatic uploading to [Garmin Connect](http://connect.garmin.com/). The files can be manually uploaded after the fact, but since they are not "from Garmin", they will not be used to calculate Garmin's **Training Effect**, which is used for suggested workouts and other features, especially if you have a watch or cycling computer that uses these features.
+The primary motivation for this tool came from the fact that that [TrainingPeaks Virtual](https://www.trainingpeaks.com/virtual/) (previously *indieVelo*) does/did not support automatic uploading to [Garmin Connect](http://connect.garmin.com/). The files can be manually uploaded after the fact, but since they are not "from Garmin", they will not be used to calculate Garmin's **Training Effect**, which is used for suggested workouts and other features, especially if you have a watch or cycling computer that uses these features.
 
 By changing the FIT file to appear to come from a Garmin device, those features are enabled.
 
@@ -311,4 +321,8 @@ If you run into problems, please [create an issue](https://github.com/jat255/Fit
 
 The use of any registered or unregistered trademarks owned by third-parties are used only for informational purposes and no endorsement of this software by the owners of such trademarks are implied, explicitly or otherwise. The terms/trademarks Garmin, indieVelo, TrainingPeaks, TrainingPeaks Virtual, Garmin Connect, Stages Cycling, MyWhoosh, Hammerhead Karoo, COROS Dura, Zwift, and any others are used under fair use doctrine solely to facilitate understanding.
 
-Likewise, the software is provided “as is”, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
+Likewise, the software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
+
+## Logo
+
+The application logo was generated primarily using AI tools. If you would like to contribute a better, custom-designed logo, we would welcome pull requests! Please feel free to open a GitHub issue or submit a PR with logo design suggestions.

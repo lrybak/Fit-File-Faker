@@ -35,7 +35,7 @@ jobs:
 
       - name: Install MkDocs dependencies
         run: |
-          uv pip install --system mkdocs-material mkdocs-minify-plugin
+          uv pip install --system mkdocs-material mkdocs-minify-plugin mkdocstrings-python
 
       - name: Generate changelog with git-cliff
         uses: orhun/git-cliff-action@v4
