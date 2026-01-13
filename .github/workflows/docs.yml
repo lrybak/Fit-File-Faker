@@ -1,0 +1,57 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [main, refactor]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'pyproject.toml'  # Contains git-cliff config
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+  workflow_call:  # Allow other workflows to call this
+
+permissions:
+  contents: write  # Push to gh-pages branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full git history for git-cliff
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.15"
+
+      - name: Install MkDocs dependencies
+        run: |
+          uv pip install --system mkdocs-material mkdocs-minify-plugin mkdocstrings-python
+
+      - name: Generate changelog with git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --verbose
+        env:
+          OUTPUT: docs/changelog.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Append historical changelog
+        run: |
+          echo "" >> docs/changelog.md
+          echo "---" >> docs/changelog.md
+          echo "" >> docs/changelog.md
+          cat docs/.changelog_pre_1.3.0.md >> docs/changelog.md
+
+      - name: Build and deploy to gh-pages
+        run: |
+          mkdocs gh-deploy --force --clean --verbose
