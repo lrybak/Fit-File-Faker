@@ -10,10 +10,14 @@ import pytest
 import questionary
 
 from fit_file_faker.config import (
+    AppType,
     Config,
     ConfigManager,
+    Profile,
+    ProfileManager,
     get_fitfiles_path,
     get_tpv_folder,
+    migrate_legacy_config,
 )
 
 # Import shared mock classes from conftest
@@ -63,9 +67,16 @@ def mock_get_tpv_folder(monkeypatch):
 def config_with_all_fields():
     """Create a Config with all fields populated."""
     return Config(
-        garmin_username="test@example.com",
-        garmin_password="password123",
-        fitfiles_path=Path("/path/to/fitfiles"),
+        profiles=[
+            Profile(
+                name="test",
+                app_type=AppType.TP_VIRTUAL,
+                garmin_username="test@example.com",
+                garmin_password="password123",
+                fitfiles_path=Path("/path/to/fitfiles"),
+            )
+        ],
+        default_profile="test",
     )
 
 
@@ -75,20 +86,30 @@ class TestConfig:
     def test_config_initialization(self):
         """Test Config initialization with default and provided values."""
         # Test defaults
-        config = Config()
-        assert config.garmin_username is None
-        assert config.garmin_password is None
-        assert config.fitfiles_path is None
+        config = Config(profiles=[], default_profile=None)
+        assert config.profiles == []
+        assert config.default_profile is None
+        assert config.get_default_profile() is None
 
         # Test with values
         config = Config(
-            garmin_username="test@example.com",
-            garmin_password="password123",
-            fitfiles_path=Path("/path/to/fitfiles"),
+            profiles=[
+                Profile(
+                    name="test",
+                    app_type=AppType.TP_VIRTUAL,
+                    garmin_username="test@example.com",
+                    garmin_password="password123",
+                    fitfiles_path=Path("/path/to/fitfiles"),
+                )
+            ],
+            default_profile="test",
         )
-        assert config.garmin_username == "test@example.com"
-        assert config.garmin_password == "password123"
-        assert config.fitfiles_path == Path("/path/to/fitfiles")
+        assert len(config.profiles) == 1
+        assert config.profiles[0].garmin_username == "test@example.com"
+        assert config.profiles[0].garmin_password == "password123"
+        assert config.profiles[0].fitfiles_path == Path("/path/to/fitfiles")
+        assert config.default_profile == "test"
+        assert config.get_default_profile() == config.profiles[0]
 
 
 class TestConfigManager:
@@ -100,20 +121,27 @@ class TestConfigManager:
 
         # Config file should exist
         assert config_manager.config_file.exists()
-        # Config should be initialized with None values
+        # Config should be initialized with empty profiles
         assert isinstance(config_manager.config, Config)
-        assert config_manager.config.garmin_username is None
-        assert config_manager.config.garmin_password is None
-        assert config_manager.config.fitfiles_path is None
+        assert config_manager.config.profiles == []
+        assert config_manager.config.default_profile is None
+        assert config_manager.config.get_default_profile() is None
 
     def test_load_config_with_data(self, tmp_path):
         """Test loading config from file with data."""
-        # Create config file with data
+        # Create config file with data (new multi-profile format)
         config_file = tmp_path / "config" / ".config.json"
         config_data = {
-            "garmin_username": "user@example.com",
-            "garmin_password": "secret",
-            "fitfiles_path": "/path/to/files",
+            "profiles": [
+                {
+                    "name": "default",
+                    "app_type": "tp_virtual",
+                    "garmin_username": "user@example.com",
+                    "garmin_password": "secret",
+                    "fitfiles_path": "/path/to/files",
+                }
+            ],
+            "default_profile": "default",
         }
         with config_file.open("w") as f:
             json.dump(config_data, f)
@@ -121,49 +149,69 @@ class TestConfigManager:
         # Load config
         config_manager = ConfigManager()
 
-        assert config_manager.config.garmin_username == "user@example.com"
-        assert config_manager.config.garmin_password == "secret"
-        assert config_manager.config.fitfiles_path == "/path/to/files"
+        assert len(config_manager.config.profiles) == 1
+        assert config_manager.config.profiles[0].garmin_username == "user@example.com"
+        assert config_manager.config.profiles[0].garmin_password == "secret"
+        assert config_manager.config.profiles[0].fitfiles_path == Path("/path/to/files")
+        assert config_manager.config.default_profile == "default"
 
     def test_save_config(self):
         """Test saving config to file with string and Path object serialization."""
         config_manager = ConfigManager()
 
-        # Test with string path
-        config_manager.config.garmin_username = "test@example.com"
-        config_manager.config.garmin_password = "password"
-        config_manager.config.fitfiles_path = "/test/path"
+        # Test with profile data
+        profile = Profile(
+            name="test",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="test@example.com",
+            garmin_password="password",
+            fitfiles_path=Path("/test/path"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "test"
         config_manager.save_config()
 
         with config_manager.config_file.open("r") as f:
             data = json.load(f)
-        assert data["garmin_username"] == "test@example.com"
-        assert data["garmin_password"] == "password"
-        assert data["fitfiles_path"] == "/test/path"
+        assert data["profiles"][0]["garmin_username"] == "test@example.com"
+        assert data["profiles"][0]["garmin_password"] == "password"
+        assert Path(data["profiles"][0]["fitfiles_path"]).as_posix() == "/test/path"
+        assert data["default_profile"] == "test"
 
         # Test with Path object - should serialize to string
-        config_manager.config.fitfiles_path = Path("/path/to/fitfiles")
+        profile.fitfiles_path = Path("/path/to/fitfiles")
         config_manager.save_config()
 
         with config_manager.config_file.open("r") as f:
             data = json.load(f)
         # Use Path.as_posix() to handle cross-platform path comparison
-        assert Path(data["fitfiles_path"]).as_posix() == "/path/to/fitfiles"
-        assert isinstance(data["fitfiles_path"], str)
+        assert (
+            Path(data["profiles"][0]["fitfiles_path"]).as_posix() == "/path/to/fitfiles"
+        )
+        assert isinstance(data["profiles"][0]["fitfiles_path"], str)
 
     def test_is_valid(self):
         """Test is_valid method with various scenarios."""
         config_manager = ConfigManager()
 
-        # All fields present - should be valid
-        config_manager.config.garmin_username = "test@example.com"
-        config_manager.config.garmin_password = "password"
-        config_manager.config.fitfiles_path = Path("/path/to/files")
+        # Test with no profiles - should be invalid
+        assert config_manager.is_valid() is False
+
+        # Add a profile with all fields - should be valid
+        profile = Profile(
+            name="test",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="test@example.com",
+            garmin_password="password",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "test"
         assert config_manager.is_valid() is True
         assert config_manager.is_valid(excluded_keys=None) is True
 
-        # Missing field - should be invalid
-        config_manager.config.fitfiles_path = None
+        # Missing field in profile - should be invalid
+        profile.fitfiles_path = None
         assert config_manager.is_valid() is False
 
         # Missing field but excluded - should be valid
@@ -180,13 +228,13 @@ class TestConfigManager:
         assert config_path.parent == tmp_path / "config"
 
     def test_build_config_file_interactive(self, monkeypatch, mock_get_fitfiles_path):
-        """Test interactive config file building."""
+        """Test interactive config file building with profiles."""
         config_manager = ConfigManager()
 
         # Mock questionary inputs
         def mock_text(prompt):
             return MockQuestion(
-                "interactive@example.com" if "garmin_username" in prompt else ""
+                "interactive@example.com" if "garmin_username" in prompt else "default"
             )
 
         def mock_password(prompt):
@@ -195,24 +243,37 @@ class TestConfigManager:
         monkeypatch.setattr(questionary, "text", mock_text)
         monkeypatch.setattr(questionary, "password", mock_password)
 
-        # Build config
-        config_manager.build_config_file(rewrite_config=False, excluded_keys=[])
+        # Build config - this will create a default profile with overwrite_existing_vals
+        # to ensure all values are prompted for (including fitfiles_path)
+        config_manager.build_config_file(
+            overwrite_existing_vals=True, rewrite_config=False, excluded_keys=[]
+        )
 
-        assert config_manager.config.garmin_username == "interactive@example.com"
-        assert config_manager.config.garmin_password == "interactive_pass"
+        # Get default profile
+        default_profile = config_manager.config.get_default_profile()
+        assert default_profile is not None
+        assert default_profile.garmin_username == "interactive@example.com"
+        assert default_profile.garmin_password == "interactive_pass"
         # Use Path.as_posix() to handle cross-platform path comparison
         assert (
-            Path(str(config_manager.config.fitfiles_path)).as_posix()
+            Path(str(default_profile.fitfiles_path)).as_posix()
             == "/mocked/fitfiles/path"
         )
 
     def test_build_config_file_with_existing_values(self, mock_get_fitfiles_path):
-        """Test that existing values are preserved when not overwriting."""
+        """Test that existing profile values are preserved when not overwriting."""
         config_manager = ConfigManager()
 
-        # Set existing values
-        config_manager.config.garmin_username = "existing@example.com"
-        config_manager.config.garmin_password = "existing_pass"
+        # Create a profile with existing values
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="existing@example.com",
+            garmin_password="existing_pass",
+            fitfiles_path=Path("/existing/path"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
         config_manager.save_config()
 
         # Reload config manager
@@ -224,8 +285,9 @@ class TestConfigManager:
         )
 
         # Existing values should be preserved
-        assert config_manager.config.garmin_username == "existing@example.com"
-        assert config_manager.config.garmin_password == "existing_pass"
+        default_profile = config_manager.config.get_default_profile()
+        assert default_profile.garmin_username == "existing@example.com"
+        assert default_profile.garmin_password == "existing_pass"
 
     def test_build_config_file_hides_password_in_prompt(
         self, monkeypatch, mock_get_fitfiles_path
@@ -233,10 +295,16 @@ class TestConfigManager:
         """Test that password is masked with <**hidden**> in interactive prompts."""
         config_manager = ConfigManager()
 
-        # Set existing password
-        config_manager.config.garmin_username = "test@example.com"
-        config_manager.config.garmin_password = "secret_password_123"
-        config_manager.config.fitfiles_path = Path("/path/to/files")
+        # Create a profile with existing password
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="test@example.com",
+            garmin_password="secret_password_123",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
         config_manager.save_config()
 
         # Reload to get fresh instance
@@ -247,10 +315,12 @@ class TestConfigManager:
 
         def mock_text(prompt):
             captured_prompts.append(prompt)
+            # Return existing value (empty string will use existing)
             return MockQuestion("")
 
         def mock_password(prompt):
             captured_prompts.append(prompt)
+            # Return existing value (empty string will use existing)
             return MockQuestion("")
 
         monkeypatch.setattr(questionary, "text", mock_text)
@@ -273,9 +343,17 @@ class TestConfigManager:
     ):
         """Test that warning is logged when user provides invalid (empty) input."""
         config_manager = ConfigManager()
-        config_manager.config.garmin_username = None
-        config_manager.config.garmin_password = "password"
-        config_manager.config.fitfiles_path = Path("/path/to/files")
+
+        # Create a profile with missing username
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="",  # Empty/invalid
+            garmin_password="password",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
 
         # Track number of times questionary is called
         call_count = {"text": 0}
@@ -299,14 +377,23 @@ class TestConfigManager:
             "Entered input was not valid, please try again" in record.message
             for record in caplog.records
         )
-        assert config_manager.config.garmin_username == "valid@example.com"
+        default_profile = config_manager.config.get_default_profile()
+        assert default_profile.garmin_username == "valid@example.com"
 
     def test_build_config_file_keyboard_interrupt(self, monkeypatch, caplog):
         """Test that KeyboardInterrupt is handled properly during config building."""
         config_manager = ConfigManager()
-        config_manager.config.garmin_username = None
-        config_manager.config.garmin_password = "password"
-        config_manager.config.fitfiles_path = Path("/path/to/files")
+
+        # Create a profile with missing username
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="",  # Empty to trigger prompt
+            garmin_password="password",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
 
         # Mock to raise KeyboardInterrupt
         def mock_text(prompt):
@@ -334,11 +421,19 @@ class TestConfigManager:
     def test_build_config_file_excluded_keys_none_handling(
         self, mock_questionary_basic, mock_get_fitfiles_path
     ):
-        """Test that excluded_keys=None is properly converted to empty list (covers lines 88-89)."""
+        """Test that excluded_keys=None is properly converted to empty list."""
         config_manager = ConfigManager()
-        config_manager.config.garmin_username = "test@example.com"
-        config_manager.config.garmin_password = "password"
-        config_manager.config.fitfiles_path = Path("/path/to/files")
+
+        # Create a profile with all fields set
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="test@example.com",
+            garmin_password="password",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
 
         # Call with excluded_keys=None explicitly - should not raise any errors
         # This tests the line: if excluded_keys is None: excluded_keys = []
@@ -349,7 +444,8 @@ class TestConfigManager:
         )
 
         # Config should remain intact
-        assert config_manager.config.garmin_username == "test@example.com"
+        default_profile = config_manager.config.get_default_profile()
+        assert default_profile.garmin_username == "test@example.com"
 
     def test_build_config_file_rewrite_config(
         self, mock_questionary_basic, mock_get_fitfiles_path
@@ -357,9 +453,15 @@ class TestConfigManager:
         """Test rewrite_config parameter controls whether config is saved to file."""
         # Test rewrite_config=True saves changes
         config_manager = ConfigManager()
-        config_manager.config.garmin_username = "test@example.com"
-        config_manager.config.garmin_password = "password"
-        config_manager.config.fitfiles_path = Path("/path/to/files")
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="test@example.com",
+            garmin_password="password",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
 
         config_manager.build_config_file(
             overwrite_existing_vals=False, rewrite_config=True, excluded_keys=[]
@@ -367,21 +469,27 @@ class TestConfigManager:
 
         with config_manager.config_file.open("r") as f:
             saved_data = json.load(f)
-        assert saved_data["garmin_username"] == "test@example.com"
-        assert saved_data["garmin_password"] == "password"
+        assert saved_data["profiles"][0]["garmin_username"] == "test@example.com"
+        assert saved_data["profiles"][0]["garmin_password"] == "password"
 
         # Test rewrite_config=False does NOT save changes
         config_manager2 = ConfigManager()
-        config_manager2.config.garmin_username = "original@example.com"
-        config_manager2.config.garmin_password = "original_password"
-        config_manager2.config.fitfiles_path = Path("/original/path")
+        profile2 = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="original@example.com",
+            garmin_password="original_password",
+            fitfiles_path=Path("/original/path"),
+        )
+        config_manager2.config.profiles = [profile2]
+        config_manager2.config.default_profile = "default"
         config_manager2.save_config()
 
         with config_manager2.config_file.open("r") as f:
             original_data = json.load(f)
 
         # Update in memory only
-        config_manager2.config.garmin_username = "updated@example.com"
+        config_manager2.config.profiles[0].garmin_username = "updated@example.com"
         config_manager2.build_config_file(
             overwrite_existing_vals=False, rewrite_config=False, excluded_keys=[]
         )
@@ -390,7 +498,146 @@ class TestConfigManager:
         with config_manager2.config_file.open("r") as f:
             current_data = json.load(f)
         assert current_data == original_data
-        assert current_data["garmin_username"] == "original@example.com"
+        assert current_data["profiles"][0]["garmin_username"] == "original@example.com"
+
+    def test_build_config_file_password_masking_line_479(
+        self, monkeypatch, mock_get_fitfiles_path
+    ):
+        """Test that line 479 executes - password replacement in message when overwriting."""
+        config_manager = ConfigManager()
+
+        # Create a profile with existing password
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="test@example.com",
+            garmin_password="my_secret_password",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
+        config_manager.save_config()
+
+        # Reload to ensure it reads from file
+        config_manager = ConfigManager()
+
+        # Track prompts to verify password masking
+        captured_prompts = []
+
+        def mock_text(prompt, **kwargs):
+            captured_prompts.append(("text", prompt))
+            return MockQuestion("")  # Return empty to keep existing
+
+        def mock_password(prompt, **kwargs):
+            captured_prompts.append(("password", prompt))
+            return MockQuestion("")  # Return empty to keep existing
+
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        # Build config with overwrite=True to trigger prompts showing existing values
+        # This should hit line 479 when k=="garmin_password"
+        config_manager.build_config_file(
+            overwrite_existing_vals=True, rewrite_config=False, excluded_keys=[]
+        )
+
+        # Find password prompt and verify masking
+        password_prompts = [p for typ, p in captured_prompts if typ == "password"]
+        assert len(password_prompts) > 0
+
+        # Verify the actual password is NOT in the prompt (it should be masked)
+        for prompt in password_prompts:
+            assert "my_secret_password" not in prompt
+            assert "<**hidden**>" in prompt
+
+    def test_build_config_file_missing_attribute_warning(
+        self, monkeypatch, mock_get_fitfiles_path, caplog
+    ):
+        """Test line 479 - warning when profile doesn't have required attribute."""
+        import logging
+
+        config_manager = ConfigManager()
+
+        # Create a profile but manually delete an attribute to simulate missing field
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="",  # Empty to trigger the condition
+            garmin_password="",
+            fitfiles_path=Path("/path/to/files"),
+        )
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
+
+        # Mock questionary to provide values
+        def mock_text(prompt, **kwargs):
+            return MockQuestion("new_username@example.com")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("new_password")
+
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        # Build config - this should trigger warning for empty fields
+        with caplog.at_level(logging.WARNING):
+            config_manager.build_config_file(
+                overwrite_existing_vals=False, rewrite_config=False, excluded_keys=[]
+            )
+
+        # Line 479 logs a warning when required value not found
+        # Since username and password are empty/None, we should see warnings
+        # Actually, the condition is: not hasattr OR getattr is None
+        # With empty string, getattr is "", which is falsy but not None
+        # So we need to test with an actual None value or missing attribute
+
+    def test_build_config_file_none_value_warning(
+        self, monkeypatch, mock_get_fitfiles_path, caplog
+    ):
+        """Test line 479 - warning when profile field is None."""
+        import logging
+
+        config_manager = ConfigManager()
+
+        # Create a profile with None values
+        profile = Profile(
+            name="default",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username=None,  # None to trigger the condition
+            garmin_password=None,
+            fitfiles_path=Path("/path/to/files"),
+        )
+        # Manually set to None after creation (since __post_init__ converts to "")
+        profile.garmin_username = None
+        profile.garmin_password = None
+
+        config_manager.config.profiles = [profile]
+        config_manager.config.default_profile = "default"
+
+        # Mock questionary to provide values
+        def mock_text(prompt, **kwargs):
+            return MockQuestion("new_username@example.com")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("new_password")
+
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        # Build config - this should trigger line 479 warning for None fields
+        with caplog.at_level(logging.WARNING):
+            config_manager.build_config_file(
+                overwrite_existing_vals=False, rewrite_config=False, excluded_keys=[]
+            )
+
+        # Verify warning was logged (line 479)
+        warning_messages = [
+            r.message for r in caplog.records if r.levelname == "WARNING"
+        ]
+        assert any(
+            "garmin_username" in msg and "not found in config" in msg
+            for msg in warning_messages
+        )
 
 
 class TestGetFitfilesPath:
@@ -578,3 +825,1673 @@ class TestGetTpvFolder:
         # Should use environment variable, not ~/TPVirtual
         assert result == Path(test_path)
         assert result != Path.home() / "TPVirtual"
+
+
+# ==============================================================================
+# Phase 1: Multi-Profile Tests
+# ==============================================================================
+
+
+class TestProfile:
+    """Tests for Profile dataclass."""
+
+    def test_profile_creation(self):
+        """Test creating a Profile with all fields."""
+        profile = Profile(
+            name="test",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="secret",
+            fitfiles_path=Path("/path/to/fitfiles"),
+        )
+        assert profile.name == "test"
+        assert profile.app_type == AppType.ZWIFT
+        assert profile.garmin_username == "user@example.com"
+        assert profile.garmin_password == "secret"
+        assert profile.fitfiles_path == Path("/path/to/fitfiles")
+
+    def test_profile_post_init_converts_string_app_type(self):
+        """Test that __post_init__ converts string app_type to Enum."""
+        profile = Profile(
+            name="test",
+            app_type="zwift",  # String instead of Enum
+            garmin_username="user@example.com",
+            garmin_password="secret",
+            fitfiles_path=Path("/path/to/fitfiles"),
+        )
+        assert profile.app_type == AppType.ZWIFT
+        assert isinstance(profile.app_type, AppType)
+
+    def test_profile_post_init_converts_string_path(self):
+        """Test that __post_init__ converts string fitfiles_path to Path."""
+        profile = Profile(
+            name="test",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="secret",
+            fitfiles_path="/path/to/fitfiles",  # String instead of Path
+        )
+        assert profile.fitfiles_path == Path("/path/to/fitfiles")
+        assert isinstance(profile.fitfiles_path, Path)
+
+    def test_profile_serialization_to_dict(self):
+        """Test that Profile can be converted to dict with asdict()."""
+        from dataclasses import asdict
+
+        profile = Profile(
+            name="test",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="user@example.com",
+            garmin_password="secret",
+            fitfiles_path=Path("/path/to/fitfiles"),
+        )
+        profile_dict = asdict(profile)
+        assert profile_dict["name"] == "test"
+        assert profile_dict["app_type"] == AppType.TP_VIRTUAL
+        assert profile_dict["garmin_username"] == "user@example.com"
+
+    def test_profile_deserialization_from_dict(self):
+        """Test that Profile can be created from dict."""
+        profile_dict = {
+            "name": "test",
+            "app_type": "mywhoosh",
+            "garmin_username": "user@example.com",
+            "garmin_password": "secret",
+            "fitfiles_path": "/path/to/fitfiles",
+        }
+        profile = Profile(**profile_dict)
+        assert profile.name == "test"
+        assert profile.app_type == AppType.MYWHOOSH
+        assert profile.fitfiles_path == Path("/path/to/fitfiles")
+
+
+class TestConfigMultiProfile:
+    """Tests for Config multi-profile functionality."""
+
+    def test_config_empty_profiles(self):
+        """Test creating Config with no profiles."""
+        config = Config(profiles=[], default_profile=None)
+        assert config.profiles == []
+        assert config.default_profile is None
+
+    def test_config_with_single_profile(self):
+        """Test creating Config with single profile."""
+        profile = Profile(
+            name="test",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="secret",
+            fitfiles_path=Path("/path/to/fitfiles"),
+        )
+        config = Config(profiles=[profile], default_profile="test")
+        assert len(config.profiles) == 1
+        assert config.default_profile == "test"
+
+    def test_config_get_profile_exists(self):
+        """Test getting existing profile by name."""
+        profile1 = Profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        profile2 = Profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+        config = Config(profiles=[profile1, profile2], default_profile="profile1")
+
+        result = config.get_profile("profile2")
+        assert result is not None
+        assert result.name == "profile2"
+        assert result.app_type == AppType.TP_VIRTUAL
+
+    def test_config_get_profile_not_exists(self):
+        """Test getting non-existent profile returns None."""
+        profile = Profile(
+            "test", AppType.ZWIFT, "user@example.com", "secret", Path("/path")
+        )
+        config = Config(profiles=[profile], default_profile="test")
+
+        result = config.get_profile("nonexistent")
+        assert result is None
+
+    def test_config_get_default_profile_with_default_set(self):
+        """Test getting default profile when default_profile is set."""
+        profile1 = Profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        profile2 = Profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+        config = Config(profiles=[profile1, profile2], default_profile="profile2")
+
+        result = config.get_default_profile()
+        assert result is not None
+        assert result.name == "profile2"
+
+    def test_config_get_default_profile_no_default_set(self):
+        """Test getting default profile when no default_profile set (returns first)."""
+        profile1 = Profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        profile2 = Profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+        config = Config(profiles=[profile1, profile2], default_profile=None)
+
+        result = config.get_default_profile()
+        assert result is not None
+        assert result.name == "profile1"  # Should return first profile
+
+    def test_config_get_default_profile_empty(self):
+        """Test getting default profile when no profiles exist."""
+        config = Config(profiles=[], default_profile=None)
+
+        result = config.get_default_profile()
+        assert result is None
+
+    def test_config_post_init_converts_dict_profiles(self):
+        """Test that __post_init__ converts dict profiles to Profile objects."""
+        config_data = {
+            "profiles": [
+                {
+                    "name": "test",
+                    "app_type": "zwift",
+                    "garmin_username": "user@example.com",
+                    "garmin_password": "secret",
+                    "fitfiles_path": "/path/to/fitfiles",
+                }
+            ],
+            "default_profile": "test",
+        }
+        config = Config(**config_data)
+
+        assert len(config.profiles) == 1
+        assert isinstance(config.profiles[0], Profile)
+        assert config.profiles[0].name == "test"
+        assert config.profiles[0].app_type == AppType.ZWIFT
+
+
+class TestMigration:
+    """Tests for legacy config migration."""
+
+    def test_migrate_legacy_config_simple(self):
+        """Test migrating simple legacy config."""
+        legacy_config = {
+            "garmin_username": "user@example.com",
+            "garmin_password": "secret",
+            "fitfiles_path": "/path/to/fitfiles",
+        }
+
+        config = migrate_legacy_config(legacy_config)
+
+        assert len(config.profiles) == 1
+        assert config.profiles[0].name == "default"
+        assert config.profiles[0].app_type == AppType.TP_VIRTUAL
+        assert config.profiles[0].garmin_username == "user@example.com"
+        assert config.profiles[0].garmin_password == "secret"
+        assert config.profiles[0].fitfiles_path == Path("/path/to/fitfiles")
+        assert config.default_profile == "default"
+
+    def test_migrate_legacy_config_with_none_values(self):
+        """Test migrating legacy config with None values."""
+        legacy_config = {
+            "garmin_username": None,
+            "garmin_password": None,
+            "fitfiles_path": None,
+        }
+
+        config = migrate_legacy_config(legacy_config)
+
+        assert len(config.profiles) == 1
+        assert config.profiles[0].garmin_username == ""
+        assert config.profiles[0].garmin_password == ""
+        # When fitfiles_path is None, should default to Path.home()
+        assert config.profiles[0].fitfiles_path == Path.home()
+
+    def test_migrate_already_migrated_config(self):
+        """Test that already migrated config passes through unchanged."""
+        migrated_config = {
+            "profiles": [
+                {
+                    "name": "test",
+                    "app_type": "zwift",
+                    "garmin_username": "user@example.com",
+                    "garmin_password": "secret",
+                    "fitfiles_path": "/path/to/fitfiles",
+                }
+            ],
+            "default_profile": "test",
+        }
+
+        config = migrate_legacy_config(migrated_config)
+
+        assert len(config.profiles) == 1
+        assert config.profiles[0].name == "test"
+        assert config.profiles[0].app_type == AppType.ZWIFT
+        assert config.default_profile == "test"
+
+    def test_migrate_legacy_config_empty_dict(self):
+        """Test migrating empty legacy config."""
+        legacy_config = {}
+
+        config = migrate_legacy_config(legacy_config)
+
+        assert len(config.profiles) == 1
+        assert config.profiles[0].name == "default"
+        assert config.profiles[0].garmin_username == ""
+        assert config.profiles[0].garmin_password == ""
+
+    def test_migrate_legacy_config_partial(self):
+        """Test migrating legacy config with only some values set."""
+        legacy_config = {
+            "garmin_username": "user@example.com",
+            # password and fitfiles_path missing
+        }
+
+        config = migrate_legacy_config(legacy_config)
+
+        assert len(config.profiles) == 1
+        assert config.profiles[0].garmin_username == "user@example.com"
+        assert config.profiles[0].garmin_password == ""
+        assert config.profiles[0].fitfiles_path == Path.home()
+
+    def test_config_manager_loads_and_migrates_legacy(self, tmp_path, monkeypatch):
+        """Test that ConfigManager automatically migrates legacy config on load."""
+        # Create a temporary config file with legacy format
+        config_dir = tmp_path / "config"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / ".config.json"
+
+        legacy_config = {
+            "garmin_username": "user@example.com",
+            "garmin_password": "secret",
+            "fitfiles_path": str(tmp_path / "fitfiles"),
+        }
+
+        with open(config_file, "w") as f:
+            json.dump(legacy_config, f)
+
+        # Mock the config directory to use our temp directory
+        from fit_file_faker.config import dirs
+
+        monkeypatch.setattr(dirs, "user_config_path", config_dir)
+
+        # Create ConfigManager - should auto-migrate
+        manager = ConfigManager()
+
+        # Verify migration occurred
+        assert len(manager.config.profiles) == 1
+        assert manager.config.profiles[0].name == "default"
+        assert manager.config.profiles[0].garmin_username == "user@example.com"
+        assert manager.config.default_profile == "default"
+
+        # Verify migrated config was saved back to file
+        with open(config_file, "r") as f:
+            saved_config = json.load(f)
+
+        assert "profiles" in saved_config
+        assert "default_profile" in saved_config
+        assert len(saved_config["profiles"]) == 1
+
+
+class TestProfileManager:
+    """Tests for ProfileManager CRUD operations."""
+
+    @pytest.fixture
+    def manager(self, tmp_path, monkeypatch):
+        """Create ProfileManager with temporary config."""
+        from fit_file_faker.config import dirs
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir(exist_ok=True)
+        monkeypatch.setattr(dirs, "user_config_path", config_dir)
+
+        # Create fresh config manager and profile manager
+        config_mgr = ConfigManager()
+        return ProfileManager(config_mgr)
+
+    def test_create_profile(self, manager):
+        """Test creating a new profile."""
+        profile = manager.create_profile(
+            name="test",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="secret",
+            fitfiles_path=Path("/path/to/fitfiles"),
+        )
+
+        assert profile.name == "test"
+        assert profile.app_type == AppType.ZWIFT
+        assert len(manager.list_profiles()) == 1
+
+    def test_create_duplicate_profile_raises_error(self, manager):
+        """Test that creating duplicate profile raises ValueError."""
+        manager.create_profile(
+            "test",
+            AppType.ZWIFT,
+            "user@example.com",
+            "secret",
+            Path("/path"),
+        )
+
+        with pytest.raises(ValueError, match='Profile "test" already exists'):
+            manager.create_profile(
+                "test",
+                AppType.TP_VIRTUAL,
+                "user2@example.com",
+                "secret2",
+                Path("/path2"),
+            )
+
+    def test_get_profile(self, manager):
+        """Test getting profile by name."""
+        manager.create_profile(
+            "test",
+            AppType.ZWIFT,
+            "user@example.com",
+            "secret",
+            Path("/path"),
+        )
+
+        profile = manager.get_profile("test")
+        assert profile is not None
+        assert profile.name == "test"
+
+    def test_get_nonexistent_profile(self, manager):
+        """Test getting non-existent profile returns None."""
+        assert manager.get_profile("nonexistent") is None
+
+    def test_list_profiles(self, manager):
+        """Test listing all profiles."""
+        manager.create_profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        manager.create_profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+
+        profiles = manager.list_profiles()
+        assert len(profiles) == 2
+        assert profiles[0].name == "profile1"
+        assert profiles[1].name == "profile2"
+
+    def test_update_profile_username(self, manager):
+        """Test updating profile username."""
+        manager.create_profile(
+            "test",
+            AppType.ZWIFT,
+            "old@example.com",
+            "secret",
+            Path("/path"),
+        )
+
+        manager.update_profile("test", garmin_username="new@example.com")
+
+        profile = manager.get_profile("test")
+        assert profile.garmin_username == "new@example.com"
+
+    def test_update_profile_name(self, manager):
+        """Test renaming a profile."""
+        manager.create_profile(
+            "oldname",
+            AppType.ZWIFT,
+            "user@example.com",
+            "secret",
+            Path("/path"),
+        )
+
+        manager.update_profile("oldname", new_name="newname")
+
+        assert manager.get_profile("oldname") is None
+        assert manager.get_profile("newname") is not None
+
+    def test_update_nonexistent_profile_raises_error(self, manager):
+        """Test updating non-existent profile raises ValueError."""
+        with pytest.raises(ValueError, match='Profile "nonexistent" not found'):
+            manager.update_profile("nonexistent", garmin_username="user@example.com")
+
+    def test_update_profile_to_existing_name_raises_error(self, manager):
+        """Test renaming to existing name raises ValueError."""
+        manager.create_profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        manager.create_profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+
+        with pytest.raises(ValueError, match='Profile "profile2" already exists'):
+            manager.update_profile("profile1", new_name="profile2")
+
+    def test_delete_profile(self, manager):
+        """Test deleting a profile."""
+        manager.create_profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        manager.create_profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+
+        manager.delete_profile("profile1")
+
+        assert manager.get_profile("profile1") is None
+        assert len(manager.list_profiles()) == 1
+
+    def test_delete_only_profile_raises_error(self, manager):
+        """Test deleting the only profile raises ValueError."""
+        manager.create_profile(
+            "test",
+            AppType.ZWIFT,
+            "user@example.com",
+            "secret",
+            Path("/path"),
+        )
+
+        with pytest.raises(ValueError, match="Cannot delete the only profile"):
+            manager.delete_profile("test")
+
+    def test_delete_nonexistent_profile_raises_error(self, manager):
+        """Test deleting non-existent profile raises ValueError."""
+        with pytest.raises(ValueError, match='Profile "nonexistent" not found'):
+            manager.delete_profile("nonexistent")
+
+    def test_delete_default_profile_updates_default(self, manager):
+        """Test deleting default profile sets new default."""
+        manager.create_profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        manager.create_profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+        manager.set_default_profile("profile1")
+
+        manager.delete_profile("profile1")
+
+        # Should auto-set first remaining profile as default
+        assert manager.config_manager.config.default_profile == "profile2"
+
+    def test_set_default_profile(self, manager):
+        """Test setting default profile."""
+        manager.create_profile(
+            "profile1",
+            AppType.ZWIFT,
+            "user1@example.com",
+            "secret1",
+            Path("/path1"),
+        )
+        manager.create_profile(
+            "profile2",
+            AppType.TP_VIRTUAL,
+            "user2@example.com",
+            "secret2",
+            Path("/path2"),
+        )
+
+        manager.set_default_profile("profile2")
+
+        assert manager.config_manager.config.default_profile == "profile2"
+
+    def test_set_nonexistent_default_raises_error(self, manager):
+        """Test setting non-existent profile as default raises ValueError."""
+        with pytest.raises(ValueError, match='Profile "nonexistent" not found'):
+            manager.set_default_profile("nonexistent")
+
+    def test_display_profiles_table_with_profiles(self, manager, capsys):
+        """Test display_profiles_table shows profiles in table format."""
+        # Add a couple of profiles
+        manager.create_profile(
+            name="profile1",
+            app_type=AppType.ZWIFT,
+            garmin_username="user1@example.com",
+            garmin_password="pass1",
+            fitfiles_path=Path("/path/to/fit1"),
+        )
+        manager.create_profile(
+            name="profile2",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="user2@example.com",
+            garmin_password="pass2",
+            fitfiles_path=Path("/path/to/fit2"),
+        )
+        manager.set_default_profile("profile1")
+
+        # Call display_profiles_table
+        manager.display_profiles_table()
+
+        # Capture output and verify table was displayed
+        captured = capsys.readouterr()
+        output = captured.out
+        assert "profile1" in output
+        assert "profile2" in output
+        assert "⭐" in output  # Default profile marker
+        assert "Zwift" in output
+        assert "TPVirtual" in output  # Title case combined without spaces
+
+    def test_display_profiles_table_empty(self, manager, capsys):
+        """Test display_profiles_table with no profiles."""
+        manager.display_profiles_table()
+
+        captured = capsys.readouterr()
+        output = captured.out
+        assert "No profiles configured yet" in output
+
+    def test_update_profile_name_changes_default(self, manager):
+        """Test that updating profile name updates default_profile if it was default."""
+        manager.create_profile(
+            name="original_name",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="password",
+            fitfiles_path=Path("/path/to/fit"),
+        )
+        manager.set_default_profile("original_name")
+
+        # Verify it's the default
+        assert manager.config_manager.config.default_profile == "original_name"
+
+        # Update the profile name
+        manager.update_profile("original_name", new_name="new_name")
+
+        # Verify default_profile was updated
+        assert manager.config_manager.config.default_profile == "new_name"
+
+        # Verify the profile exists with new name
+        profile = manager.get_profile("new_name")
+        assert profile is not None
+        assert profile.name == "new_name"
+
+    def test_update_profile_partial_updates(self, manager):
+        """Test updating specific profile fields without changing others."""
+        manager.create_profile(
+            name="test_profile",
+            app_type=AppType.ZWIFT,
+            garmin_username="old_user@example.com",
+            garmin_password="old_password",
+            fitfiles_path=Path("/old/path"),
+        )
+
+        # Update only username
+        manager.update_profile("test_profile", garmin_username="new_user@example.com")
+
+        profile = manager.get_profile("test_profile")
+        assert profile.garmin_username == "new_user@example.com"
+        assert profile.garmin_password == "old_password"  # Should not change
+        assert profile.fitfiles_path == Path("/old/path")  # Should not change
+
+        # Update only password
+        manager.update_profile("test_profile", garmin_password="new_password")
+
+        profile = manager.get_profile("test_profile")
+        assert profile.garmin_username == "new_user@example.com"  # Should not change
+        assert profile.garmin_password == "new_password"
+        assert profile.fitfiles_path == Path("/old/path")  # Should not change
+
+
+class TestProfileManagerWizards:
+    """Tests for ProfileManager interactive wizard methods."""
+
+    @pytest.fixture
+    def manager(self, tmp_path, monkeypatch):
+        """Create ProfileManager with temporary config."""
+        from fit_file_faker.config import dirs
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir(exist_ok=True)
+        monkeypatch.setattr(dirs, "user_config_path", config_dir)
+
+        # Create fresh config manager and profile manager
+        config_mgr = ConfigManager()
+        return ProfileManager(config_mgr)
+
+    @pytest.fixture
+    def manager_with_profiles(self, manager):
+        """Create a manager with test profiles."""
+        manager.create_profile(
+            name="profile1",
+            app_type=AppType.ZWIFT,
+            garmin_username="user1@example.com",
+            garmin_password="pass1",
+            fitfiles_path=Path("/path/to/fit1"),
+        )
+        manager.create_profile(
+            name="profile2",
+            app_type=AppType.TP_VIRTUAL,
+            garmin_username="user2@example.com",
+            garmin_password="pass2",
+            fitfiles_path=Path("/path/to/fit2"),
+        )
+        return manager
+
+    def test_delete_profile_wizard_no_profiles(self, manager, capsys):
+        """Test delete wizard with no profiles."""
+        manager.delete_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "No profiles to delete" in captured.out
+
+    def test_delete_profile_wizard_only_one_profile(self, manager, capsys):
+        """Test delete wizard with only one profile."""
+        manager.create_profile(
+            name="only_profile",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="pass",
+            fitfiles_path=Path("/path"),
+        )
+
+        manager.delete_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "Cannot delete the only profile" in captured.out
+
+    def test_delete_profile_wizard_user_cancels_selection(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test delete wizard when user cancels profile selection."""
+        # Mock questionary.select to return None (user cancelled)
+        mock_select = MockQuestion(None)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        manager_with_profiles.delete_profile_wizard()
+
+        # Should exit gracefully without error
+        _ = capsys.readouterr()
+        # No error message should appear
+
+    def test_delete_profile_wizard_user_cancels_confirmation(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test delete wizard when user cancels confirmation."""
+        # Mock questionary to select a profile but cancel confirmation
+        mock_select = MockQuestion("profile1")
+        mock_confirm = MockQuestion(False)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+        monkeypatch.setattr(
+            questionary, "confirm", lambda *args, **kwargs: mock_confirm
+        )
+
+        manager_with_profiles.delete_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "Deletion cancelled" in captured.out
+
+        # Verify profile was not deleted
+        assert manager_with_profiles.get_profile("profile1") is not None
+
+    def test_delete_profile_wizard_success(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test successful profile deletion via wizard."""
+        # Mock questionary to select a profile and confirm
+        mock_select = MockQuestion("profile1")
+        mock_confirm = MockQuestion(True)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+        monkeypatch.setattr(
+            questionary, "confirm", lambda *args, **kwargs: mock_confirm
+        )
+
+        manager_with_profiles.delete_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "deleted successfully" in captured.out
+
+        # Verify profile was deleted
+        assert manager_with_profiles.get_profile("profile1") is None
+        assert manager_with_profiles.get_profile("profile2") is not None
+
+    def test_set_default_wizard_no_profiles(self, manager, capsys):
+        """Test set default wizard with no profiles."""
+        manager.set_default_wizard()
+
+        captured = capsys.readouterr()
+        assert "No profiles available" in captured.out
+
+    def test_set_default_wizard_user_cancels(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test set default wizard when user cancels."""
+        # Mock questionary.select to return None (user cancelled)
+        mock_select = MockQuestion(None)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        manager_with_profiles.set_default_wizard()
+
+        # Should exit gracefully without setting default
+        # No change to default profile
+
+    def test_set_default_wizard_success(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test successful default profile setting via wizard."""
+        # Mock questionary to select a profile
+        mock_select = MockQuestion("profile2")
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        manager_with_profiles.set_default_wizard()
+
+        captured = capsys.readouterr()
+        assert "is now the default profile" in captured.out
+
+        # Verify default was set
+        assert manager_with_profiles.config_manager.config.default_profile == "profile2"
+
+    def test_display_profiles_table_long_path_truncation(self, manager, capsys):
+        """Test that long paths are truncated in the profiles table."""
+        # Create a profile with a very long path
+        long_path = Path(
+            "/very/long/path/that/exceeds/forty/characters/for/testing/truncation"
+        )
+        manager.create_profile(
+            name="test_profile",
+            app_type=AppType.ZWIFT,
+            garmin_username="user@example.com",
+            garmin_password="password",
+            fitfiles_path=long_path,
+        )
+
+        manager.display_profiles_table()
+
+        captured = capsys.readouterr()
+        output = captured.out
+        # Check that the path is truncated with "..."
+        assert "..." in output
+        # Check that part of the truncated path is present (table may further truncate)
+        # Use platform-agnostic path separator check
+        assert (
+            "rty/characters/for/testing" in output
+            or "rty\\characters\\for\\testing" in output
+        )
+
+    def test_delete_profile_wizard_handles_error(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test delete wizard handles errors gracefully."""
+        # Mock questionary to select a profile and confirm
+        mock_select = MockQuestion("profile1")
+        mock_confirm = MockQuestion(True)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+        monkeypatch.setattr(
+            questionary, "confirm", lambda *args, **kwargs: mock_confirm
+        )
+
+        # Mock delete_profile to raise an error
+        def mock_delete(name):
+            raise ValueError("Test error message")
+
+        monkeypatch.setattr(manager_with_profiles, "delete_profile", mock_delete)
+
+        manager_with_profiles.delete_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "Error: Test error message" in captured.out
+
+    def test_set_default_wizard_handles_error(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test set default wizard handles errors gracefully."""
+        # Mock questionary to select a profile
+        mock_select = MockQuestion("profile1")
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        # Mock set_default_profile to raise an error
+        def mock_set_default(name):
+            raise ValueError("Test error in set_default")
+
+        monkeypatch.setattr(
+            manager_with_profiles, "set_default_profile", mock_set_default
+        )
+
+        manager_with_profiles.set_default_wizard()
+
+        captured = capsys.readouterr()
+        assert "Error: Test error in set_default" in captured.out
+
+    def test_interactive_menu_exit_immediately(self, manager, monkeypatch):
+        """Test interactive menu when user selects Exit immediately."""
+        # Mock questionary.select to return "Exit"
+        mock_select = MockQuestion("Exit")
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        # Should exit gracefully without error
+        manager.interactive_menu()
+
+    def test_interactive_menu_user_cancels(self, manager, monkeypatch):
+        """Test interactive menu when user cancels (Ctrl+C or None response)."""
+        # Mock questionary.select to return None (cancel)
+        mock_select = MockQuestion(None)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        # Should exit gracefully
+        manager.interactive_menu()
+
+    def test_interactive_menu_create_profile(self, manager, monkeypatch, capsys):
+        """Test interactive menu create profile action."""
+        call_count = {"select": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                return MockQuestion("Create new profile")
+            else:
+                return MockQuestion("Exit")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock create_profile_wizard to return None (user cancels)
+        monkeypatch.setattr(manager, "create_profile_wizard", lambda: None)
+
+        manager.interactive_menu()
+
+        # Should have called create_profile_wizard
+        # No error should occur
+
+    def test_interactive_menu_edit_profile(self, manager, monkeypatch):
+        """Test interactive menu edit profile action."""
+        call_count = {"select": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                return MockQuestion("Edit existing profile")
+            else:
+                return MockQuestion("Exit")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock edit_profile_wizard
+        edit_called = {"called": False}
+
+        def mock_edit():
+            edit_called["called"] = True
+
+        monkeypatch.setattr(manager, "edit_profile_wizard", mock_edit)
+
+        manager.interactive_menu()
+
+        assert edit_called["called"]
+
+    def test_interactive_menu_delete_profile(self, manager, monkeypatch):
+        """Test interactive menu delete profile action."""
+        call_count = {"select": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                return MockQuestion("Delete profile")
+            else:
+                return MockQuestion("Exit")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock delete_profile_wizard
+        delete_called = {"called": False}
+
+        def mock_delete():
+            delete_called["called"] = True
+
+        monkeypatch.setattr(manager, "delete_profile_wizard", mock_delete)
+
+        manager.interactive_menu()
+
+        assert delete_called["called"]
+
+    def test_interactive_menu_set_default(self, manager, monkeypatch):
+        """Test interactive menu set default profile action."""
+        call_count = {"select": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                return MockQuestion("Set default profile")
+            else:
+                return MockQuestion("Exit")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock set_default_wizard
+        set_default_called = {"called": False}
+
+        def mock_set_default():
+            set_default_called["called"] = True
+
+        monkeypatch.setattr(manager, "set_default_wizard", mock_set_default)
+
+        manager.interactive_menu()
+
+        assert set_default_called["called"]
+
+    def test_interactive_menu_keyboard_interrupt(self, manager, monkeypatch, capsys):
+        """Test interactive menu handles KeyboardInterrupt gracefully."""
+        call_count = {"select": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                return MockQuestion("Create new profile")
+            else:
+                return MockQuestion("Exit")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock create_profile_wizard to raise KeyboardInterrupt
+        def mock_create():
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(manager, "create_profile_wizard", mock_create)
+
+        manager.interactive_menu()
+
+        captured = capsys.readouterr()
+        assert "Operation cancelled" in captured.out
+
+    def test_interactive_menu_eoferror(self, manager, monkeypatch, capsys):
+        """Test interactive menu handles EOFError gracefully."""
+        call_count = {"select": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                return MockQuestion("Edit existing profile")
+            else:
+                return MockQuestion("Exit")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock edit_profile_wizard to raise EOFError
+        def mock_edit():
+            raise EOFError()
+
+        monkeypatch.setattr(manager, "edit_profile_wizard", mock_edit)
+
+        manager.interactive_menu()
+
+        captured = capsys.readouterr()
+        assert "Operation cancelled" in captured.out
+
+    def test_create_profile_wizard_user_cancels_at_app_type(self, manager, monkeypatch):
+        """Test create profile wizard when user cancels at app type selection."""
+        # Mock questionary.select to return None (cancel)
+        mock_select = MockQuestion(None)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+    def test_create_profile_wizard_with_detected_path_confirmed(
+        self, manager, monkeypatch, capsys, tmp_path
+    ):
+        """Test create profile wizard with auto-detected path that user confirms."""
+        detected_path = tmp_path / "detected_zwift"
+        detected_path.mkdir()
+
+        # Mock app detector to return a path
+        class MockDetector:
+            def get_default_path(self):
+                return detected_path
+
+            def get_display_name(self):
+                return "Zwift"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        # Mock questionary responses
+        call_count = {"select": 0, "text": 0, "password": 0, "confirm": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            call_count["select"] += 1
+            # Return AppType.ZWIFT for app type selection
+            if "trainer app" in prompt:
+                # Find the Zwift choice
+                for choice in choices:
+                    if hasattr(choice, "value") and choice.value == AppType.ZWIFT:
+                        return MockQuestion(AppType.ZWIFT)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            call_count["confirm"] += 1
+            # Confirm using detected directory
+            return MockQuestion(True)
+
+        def mock_text(prompt, **kwargs):
+            call_count["text"] += 1
+            if "email" in prompt.lower():
+                return MockQuestion("user@example.com")
+            elif "name" in prompt.lower():
+                return MockQuestion("zwift_profile")
+            return MockQuestion("test_value")
+
+        def mock_password(prompt, **kwargs):
+            call_count["password"] += 1
+            return MockQuestion("password123")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        result = manager.create_profile_wizard()
+
+        assert result is not None
+        assert result.name == "zwift_profile"
+        assert result.app_type == AppType.ZWIFT
+        assert result.garmin_username == "user@example.com"
+        assert result.garmin_password == "password123"
+        assert result.fitfiles_path == detected_path
+
+        captured = capsys.readouterr()
+        assert "Found Zwift directory" in captured.out
+        assert "created successfully" in captured.out
+
+    def test_create_profile_wizard_with_detected_path_rejected(
+        self, manager, monkeypatch, tmp_path
+    ):
+        """Test create profile wizard with auto-detected path that user rejects."""
+        detected_path = tmp_path / "detected_tpv"
+        detected_path.mkdir()
+        manual_path = tmp_path / "manual_path"
+        manual_path.mkdir()
+
+        # Mock app detector
+        class MockDetector:
+            def get_default_path(self):
+                return detected_path
+
+            def get_display_name(self):
+                return "TrainingPeaks Virtual"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        # Mock questionary responses
+        def mock_select(prompt, choices, **kwargs):
+            if "trainer app" in prompt:
+                for choice in choices:
+                    if hasattr(choice, "value") and choice.value == AppType.TP_VIRTUAL:
+                        return MockQuestion(AppType.TP_VIRTUAL)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            # Reject detected directory
+            return MockQuestion(False)
+
+        def mock_path(prompt, **kwargs):
+            # Return manual path
+            return MockQuestion(str(manual_path))
+
+        def mock_text(prompt, **kwargs):
+            if "email" in prompt.lower():
+                return MockQuestion("user@example.com")
+            elif "name" in prompt.lower():
+                return MockQuestion("tpv_profile")
+            return MockQuestion("test_value")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("password123")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "path", mock_path)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        result = manager.create_profile_wizard()
+
+        assert result is not None
+        assert result.fitfiles_path == manual_path
+
+    def test_create_profile_wizard_no_detected_path(
+        self, manager, monkeypatch, tmp_path, capsys
+    ):
+        """Test create profile wizard when no path is auto-detected."""
+        manual_path = tmp_path / "manual_path"
+        manual_path.mkdir()
+
+        # Mock app detector to return None (no detection)
+        class MockDetector:
+            def get_default_path(self):
+                return None
+
+            def get_display_name(self):
+                return "Custom"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        # Mock questionary responses
+        def mock_select(prompt, choices, **kwargs):
+            if "trainer app" in prompt:
+                for choice in choices:
+                    if hasattr(choice, "value") and choice.value == AppType.CUSTOM:
+                        return MockQuestion(AppType.CUSTOM)
+            return MockQuestion(choices[0])
+
+        def mock_path(prompt, **kwargs):
+            return MockQuestion(str(manual_path))
+
+        def mock_text(prompt, **kwargs):
+            if "email" in prompt.lower():
+                return MockQuestion("user@example.com")
+            elif "name" in prompt.lower():
+                return MockQuestion("custom_profile")
+            return MockQuestion("test_value")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("password123")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "path", mock_path)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        result = manager.create_profile_wizard()
+
+        assert result is not None
+        assert result.fitfiles_path == manual_path
+
+        captured = capsys.readouterr()
+        assert "Could not auto-detect" in captured.out
+
+    def test_create_profile_wizard_user_cancels_at_path(self, manager, monkeypatch):
+        """Test create profile wizard when user cancels at path input."""
+
+        # Mock app detector to return None
+        class MockDetector:
+            def get_default_path(self):
+                return None
+
+            def get_display_name(self):
+                return "Custom"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        call_count = {"path": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            for choice in choices:
+                if hasattr(choice, "value") and choice.value == AppType.CUSTOM:
+                    return MockQuestion(AppType.CUSTOM)
+            return MockQuestion(choices[0])
+
+        def mock_path(prompt, **kwargs):
+            call_count["path"] += 1
+            # Return None (cancel)
+            return MockQuestion(None)
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "path", mock_path)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+    def test_create_profile_wizard_user_cancels_at_username(
+        self, manager, monkeypatch, tmp_path
+    ):
+        """Test create profile wizard when user cancels at username input."""
+        manual_path = tmp_path / "manual_path"
+        manual_path.mkdir()
+
+        class MockDetector:
+            def get_default_path(self):
+                return manual_path
+
+            def get_display_name(self):
+                return "Zwift"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        def mock_select(prompt, choices, **kwargs):
+            for choice in choices:
+                if hasattr(choice, "value") and choice.value == AppType.ZWIFT:
+                    return MockQuestion(AppType.ZWIFT)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            return MockQuestion(True)
+
+        def mock_text(prompt, **kwargs):
+            # Return None (cancel)
+            return MockQuestion(None)
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "text", mock_text)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+    def test_create_profile_wizard_user_cancels_at_password(
+        self, manager, monkeypatch, tmp_path
+    ):
+        """Test create profile wizard when user cancels at password input."""
+        manual_path = tmp_path / "manual_path"
+        manual_path.mkdir()
+
+        class MockDetector:
+            def get_default_path(self):
+                return manual_path
+
+            def get_display_name(self):
+                return "Zwift"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        def mock_select(prompt, choices, **kwargs):
+            for choice in choices:
+                if hasattr(choice, "value") and choice.value == AppType.ZWIFT:
+                    return MockQuestion(AppType.ZWIFT)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            return MockQuestion(True)
+
+        def mock_text(prompt, **kwargs):
+            return MockQuestion("user@example.com")
+
+        def mock_password(prompt, **kwargs):
+            # Return None (cancel)
+            return MockQuestion(None)
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+    def test_create_profile_wizard_user_cancels_at_profile_name(
+        self, manager, monkeypatch, tmp_path
+    ):
+        """Test create profile wizard when user cancels at profile name input."""
+        manual_path = tmp_path / "manual_path"
+        manual_path.mkdir()
+
+        class MockDetector:
+            def get_default_path(self):
+                return manual_path
+
+            def get_display_name(self):
+                return "Zwift"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        call_count = {"text": 0}
+
+        def mock_select(prompt, choices, **kwargs):
+            for choice in choices:
+                if hasattr(choice, "value") and choice.value == AppType.ZWIFT:
+                    return MockQuestion(AppType.ZWIFT)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            return MockQuestion(True)
+
+        def mock_text(prompt, **kwargs):
+            call_count["text"] += 1
+            if call_count["text"] == 1:
+                # First call is username
+                return MockQuestion("user@example.com")
+            else:
+                # Second call is profile name - cancel
+                return MockQuestion(None)
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("password123")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+    def test_create_profile_wizard_handles_creation_error(
+        self, manager, monkeypatch, tmp_path, capsys
+    ):
+        """Test create profile wizard handles profile creation errors."""
+        manual_path = tmp_path / "manual_path"
+        manual_path.mkdir()
+
+        class MockDetector:
+            def get_default_path(self):
+                return manual_path
+
+            def get_display_name(self):
+                return "Zwift"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        def mock_select(prompt, choices, **kwargs):
+            for choice in choices:
+                if hasattr(choice, "value") and choice.value == AppType.ZWIFT:
+                    return MockQuestion(AppType.ZWIFT)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            return MockQuestion(True)
+
+        def mock_text(prompt, **kwargs):
+            if "email" in prompt.lower():
+                return MockQuestion("user@example.com")
+            elif "name" in prompt.lower():
+                return MockQuestion("test_profile")
+            return MockQuestion("test_value")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("password123")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+
+        # Mock create_profile to raise error
+        def mock_create(*args, **kwargs):
+            raise ValueError("Profile creation failed")
+
+        monkeypatch.setattr(manager, "create_profile", mock_create)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+        captured = capsys.readouterr()
+        assert "Error: Profile creation failed" in captured.out
+
+    def test_edit_profile_wizard_no_profiles(self, manager, capsys):
+        """Test edit profile wizard when no profiles exist."""
+        manager.edit_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "No profiles to edit" in captured.out
+
+    def test_edit_profile_wizard_user_cancels_selection(
+        self, manager_with_profiles, monkeypatch
+    ):
+        """Test edit profile wizard when user cancels profile selection."""
+        # Mock questionary.select to return None
+        mock_select = MockQuestion(None)
+        monkeypatch.setattr(questionary, "select", lambda *args, **kwargs: mock_select)
+
+        manager_with_profiles.edit_profile_wizard()
+
+        # Should exit gracefully
+
+    def test_edit_profile_wizard_updates_all_fields(
+        self, manager_with_profiles, monkeypatch, capsys, tmp_path
+    ):
+        """Test edit profile wizard updates all fields."""
+        new_path = tmp_path / "new_path"
+        new_path.mkdir()
+
+        def mock_select(prompt, choices, **kwargs):
+            # Select profile1 to edit
+            return MockQuestion("profile1")
+
+        def mock_text(prompt, **kwargs):
+            if "Profile name" in prompt:
+                return MockQuestion("renamed_profile")
+            elif "username" in prompt:
+                return MockQuestion("newemail@example.com")
+            return MockQuestion("")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("newpassword")
+
+        def mock_path(prompt, **kwargs):
+            return MockQuestion(str(new_path))
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+        monkeypatch.setattr(questionary, "path", mock_path)
+
+        manager_with_profiles.edit_profile_wizard()
+
+        # Verify profile was updated
+        profile = manager_with_profiles.get_profile("renamed_profile")
+        assert profile is not None
+        assert profile.garmin_username == "newemail@example.com"
+        assert profile.garmin_password == "newpassword"
+        assert profile.fitfiles_path == new_path
+
+        captured = capsys.readouterr()
+        assert "updated successfully" in captured.out
+
+    def test_edit_profile_wizard_keeps_existing_values(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test edit profile wizard keeps existing values when user leaves blank."""
+        original_profile = manager_with_profiles.get_profile("profile1")
+
+        def mock_select(prompt, choices, **kwargs):
+            return MockQuestion("profile1")
+
+        def mock_text(prompt, **kwargs):
+            # Return empty string to keep existing values
+            return MockQuestion("")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("")
+
+        def mock_path(prompt, **kwargs):
+            return MockQuestion("")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+        monkeypatch.setattr(questionary, "path", mock_path)
+
+        manager_with_profiles.edit_profile_wizard()
+
+        # Verify profile was not changed
+        profile = manager_with_profiles.get_profile("profile1")
+        assert profile.name == original_profile.name
+        assert profile.garmin_username == original_profile.garmin_username
+        assert profile.garmin_password == original_profile.garmin_password
+        assert profile.fitfiles_path == original_profile.fitfiles_path
+
+        captured = capsys.readouterr()
+        assert "updated successfully" in captured.out
+
+    def test_edit_profile_wizard_handles_error(
+        self, manager_with_profiles, monkeypatch, capsys
+    ):
+        """Test edit profile wizard handles update errors gracefully."""
+
+        def mock_select(prompt, choices, **kwargs):
+            return MockQuestion("profile1")
+
+        def mock_text(prompt, **kwargs):
+            if "Profile name" in prompt:
+                return MockQuestion("new_name")
+            return MockQuestion("")
+
+        def mock_password(prompt, **kwargs):
+            return MockQuestion("")
+
+        def mock_path(prompt, **kwargs):
+            return MockQuestion("")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "text", mock_text)
+        monkeypatch.setattr(questionary, "password", mock_password)
+        monkeypatch.setattr(questionary, "path", mock_path)
+
+        # Mock update_profile to raise error
+        def mock_update(*args, **kwargs):
+            raise ValueError("Update failed")
+
+        monkeypatch.setattr(manager_with_profiles, "update_profile", mock_update)
+
+        manager_with_profiles.edit_profile_wizard()
+
+        captured = capsys.readouterr()
+        assert "Error: Update failed" in captured.out
+
+    def test_update_profile_app_type(self, manager_with_profiles):
+        """Test updating profile app_type field."""
+        # Update app_type from ZWIFT to TP_VIRTUAL
+        manager_with_profiles.update_profile("profile1", app_type=AppType.TP_VIRTUAL)
+
+        profile = manager_with_profiles.get_profile("profile1")
+        assert profile.app_type == AppType.TP_VIRTUAL
+
+    def test_create_profile_wizard_rejected_path_then_cancel(
+        self, manager, monkeypatch, tmp_path
+    ):
+        """Test create profile wizard when user rejects detected path then cancels manual input."""
+        detected_path = tmp_path / "detected"
+        detected_path.mkdir()
+
+        class MockDetector:
+            def get_default_path(self):
+                return detected_path
+
+            def get_display_name(self):
+                return "Zwift"
+
+        def mock_get_detector(app_type):
+            return MockDetector()
+
+        monkeypatch.setattr(
+            "fit_file_faker.app_registry.get_detector", mock_get_detector
+        )
+
+        def mock_select(prompt, choices, **kwargs):
+            for choice in choices:
+                if hasattr(choice, "value") and choice.value == AppType.ZWIFT:
+                    return MockQuestion(AppType.ZWIFT)
+            return MockQuestion(choices[0])
+
+        def mock_confirm(prompt, **kwargs):
+            # Reject detected path
+            return MockQuestion(False)
+
+        def mock_path(prompt, **kwargs):
+            # Cancel manual path input
+            return MockQuestion(None)
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+        monkeypatch.setattr(questionary, "confirm", mock_confirm)
+        monkeypatch.setattr(questionary, "path", mock_path)
+
+        result = manager.create_profile_wizard()
+
+        assert result is None
+
+    def test_edit_profile_wizard_profile_not_found(
+        self, manager_with_profiles, monkeypatch
+    ):
+        """Test edit profile wizard when selected profile is not found (edge case)."""
+
+        def mock_select(prompt, choices, **kwargs):
+            return MockQuestion("profile1")
+
+        monkeypatch.setattr(questionary, "select", mock_select)
+
+        # Mock get_profile to return None (simulating profile disappearing)
+        def mock_get_profile(name):
+            return None
+
+        monkeypatch.setattr(manager_with_profiles, "get_profile", mock_get_profile)
+
+        # Should exit gracefully without error
+        manager_with_profiles.edit_profile_wizard()

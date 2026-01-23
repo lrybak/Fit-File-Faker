@@ -31,11 +31,14 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import cast
 
 import questionary
 from platformdirs import PlatformDirs
+from rich.console import Console
+from rich.table import Table
 
 _logger = logging.getLogger("garmin")
 
@@ -44,61 +47,236 @@ dirs = PlatformDirs("FitFileFaker", appauthor=False, ensure_exists=True)
 
 
 class PathEncoder(json.JSONEncoder):
-    """JSON encoder that handles `pathlib.Path` objects.
+    """JSON encoder that handles `pathlib.Path` and `Enum` objects.
 
-    Extends `json.JSONEncoder` to automatically convert Path objects to strings
-    when serializing configuration to JSON format.
+    Extends `json.JSONEncoder` to automatically convert Path and Enum objects
+    to strings when serializing configuration to JSON format.
 
     Examples:
         >>> import json
         >>> from pathlib import Path
-        >>> data = {"path": Path("/home/user")}
+        >>> data = {"path": Path("/home/user"), "type": AppType.ZWIFT}
         >>> json.dumps(data, cls=PathEncoder)
-        '{"path": "/home/user"}'
+        '{"path": "/home/user", "type": "zwift"}'
     """
 
     def default(self, obj):
-        """Override default encoding for Path objects.
+        """Override default encoding for Path and Enum objects.
 
         Args:
             obj: The object to encode.
 
         Returns:
-            String representation of Path objects, or delegates to the
-            parent class for other types.
+            String representation of Path and Enum objects, or delegates to
+            the parent class for other types.
         """
         if isinstance(obj, Path):
             return str(obj)
+        if isinstance(obj, Enum):
+            return obj.value
         return super().default(obj)  # pragma: no cover
+
+
+class AppType(Enum):
+    """Supported trainer/cycling applications.
+
+    Each app type has associated directory detection logic and display names.
+    Used to identify the source application for FIT files and enable
+    platform-specific auto-detection.
+
+    Attributes:
+        TP_VIRTUAL: TrainingPeaks Virtual (formerly indieVelo)
+        ZWIFT: Zwift virtual cycling platform
+        MYWHOOSH: MyWhoosh virtual cycling platform
+        CUSTOM: Custom/manual path specification
+    """
+
+    TP_VIRTUAL = "tp_virtual"
+    ZWIFT = "zwift"
+    MYWHOOSH = "mywhoosh"
+    CUSTOM = "custom"
+
+
+@dataclass
+class Profile:
+    """Single profile configuration.
+
+    Represents a complete configuration profile with app type, credentials,
+    and FIT files directory. Each profile is independent with isolated
+    Garmin Connect credentials.
+
+    Attributes:
+        name: Unique profile identifier (used for display and garth dir naming)
+        app_type: Type of trainer app (for auto-detection and validation)
+        garmin_username: Garmin Connect account email address
+        garmin_password: Garmin Connect account password
+        fitfiles_path: Path to directory containing FIT files to process
+
+    Examples:
+        >>> from pathlib import Path
+        >>> profile = Profile(
+        ...     name="zwift",
+        ...     app_type=AppType.ZWIFT,
+        ...     garmin_username="user@example.com",
+        ...     garmin_password="secret",
+        ...     fitfiles_path=Path("/Users/user/Documents/Zwift/Activities")
+        ... )
+    """
+
+    name: str
+    app_type: AppType
+    garmin_username: str
+    garmin_password: str
+    fitfiles_path: Path
+
+    def __post_init__(self):
+        """Convert string types to proper objects after initialization.
+
+        Handles deserialization from JSON where app_type may be a string
+        and fitfiles_path may be a string path.
+        """
+        if isinstance(self.app_type, str):
+            self.app_type = AppType(self.app_type)
+        if isinstance(self.fitfiles_path, str):
+            self.fitfiles_path = Path(self.fitfiles_path)
 
 
 @dataclass
 class Config:
-    """Configuration data class for Fit File Faker.
+    """Multi-profile configuration container for Fit File Faker.
 
-    Stores all configuration values including Garmin Connect credentials
-    and the path to FIT files directory. All fields are optional to allow
-    incremental configuration building.
+    Stores multiple profile configurations, each with independent Garmin
+    credentials and FIT files directory. Supports backward compatibility
+    with single-profile configs via automatic migration.
 
     Attributes:
-        garmin_username: Garmin Connect account email address.
-        garmin_password: Garmin Connect account password.
-        fitfiles_path: Path to directory containing FIT files to process.
-            For TrainingPeaks Virtual, this typically points to the user's
-            FITFiles directory within their TPVirtual folder.
+        profiles: List of Profile objects, each representing a complete
+            configuration for a trainer app and Garmin account.
+        default_profile: Name of the default profile to use when no profile
+            is explicitly specified. If None, the first profile is used.
 
     Examples:
         >>> from pathlib import Path
         >>> config = Config(
-        ...     garmin_username="user@example.com",
-        ...     garmin_password="secret",
-        ...     fitfiles_path=Path("/home/user/TPVirtual/abc123/FITFiles")
+        ...     profiles=[
+        ...         Profile(
+        ...             name="tpv",
+        ...             app_type=AppType.TP_VIRTUAL,
+        ...             garmin_username="user@example.com",
+        ...             garmin_password="secret",
+        ...             fitfiles_path=Path("/home/user/TPVirtual/abc123/FITFiles")
+        ...         )
+        ...     ],
+        ...     default_profile="tpv"
         ... )
+        >>> profile = config.get_profile("tpv")
+        >>> default = config.get_default_profile()
     """
 
-    garmin_username: str | None = None
-    garmin_password: str | None = None
-    fitfiles_path: Path | None = None
+    profiles: list[Profile]
+    default_profile: str | None = None
+
+    def __post_init__(self):
+        """Convert dict profiles to Profile objects after initialization.
+
+        Handles deserialization from JSON where profiles may be dictionaries
+        instead of Profile objects.
+        """
+        # Convert dict profiles to Profile objects
+        if self.profiles and isinstance(self.profiles[0], dict):
+            self.profiles = [Profile(**p) for p in self.profiles]
+
+    def get_profile(self, name: str) -> Profile | None:
+        """Get profile by name.
+
+        Args:
+            name: The name of the profile to retrieve.
+
+        Returns:
+            Profile object if found, None otherwise.
+
+        Examples:
+            >>> config = Config(profiles=[Profile(name="test", ...)])
+            >>> profile = config.get_profile("test")
+        """
+        return next((p for p in self.profiles if p.name == name), None)
+
+    def get_default_profile(self) -> Profile | None:
+        """Get the default profile or first profile if no default set.
+
+        Returns:
+            The default Profile object, or the first profile if no default
+            is set, or None if no profiles exist.
+
+        Examples:
+            >>> config = Config(profiles=[...], default_profile="tpv")
+            >>> profile = config.get_default_profile()
+        """
+        if self.default_profile:
+            return self.get_profile(self.default_profile)
+        return self.profiles[0] if self.profiles else None
+
+
+def migrate_legacy_config(old_config: dict) -> Config:
+    """Migrate single-profile config to multi-profile format.
+
+    Detects legacy config structure (v1.2.4 and earlier) and converts to
+    multi-profile format. Creates a "default" profile with existing values
+    and sets it as the default profile.
+
+    Args:
+        old_config: Dictionary containing either legacy single-profile config
+            (keys: garmin_username, garmin_password, fitfiles_path) or new
+            multi-profile config (keys: profiles, default_profile).
+
+    Returns:
+        Config object in multi-profile format. If already migrated, returns
+        as-is. Otherwise, creates new Config with "default" profile.
+
+    Examples:
+        >>> legacy = {
+        ...     "garmin_username": "user@example.com",
+        ...     "garmin_password": "secret",
+        ...     "fitfiles_path": "/path/to/fitfiles"
+        ... }
+        >>> config = migrate_legacy_config(legacy)
+        >>> config.profiles[0].name
+        'default'
+        >>> config.default_profile
+        'default'
+    """
+    # Check if already migrated (has 'profiles' key)
+    if "profiles" in old_config:
+        _logger.debug("Config already in multi-profile format")
+        return Config(**old_config)
+
+    # Legacy config detected - migrate to multi-profile format
+    _logger.info(
+        "Detected legacy single-profile config, migrating to multi-profile format"
+    )
+
+    # Extract legacy values
+    garmin_username = old_config.get("garmin_username")
+    garmin_password = old_config.get("garmin_password")
+    fitfiles_path = old_config.get("fitfiles_path")
+
+    # Create default profile from legacy values
+    # Default to TP_VIRTUAL as that was the original use case
+    profile = Profile(
+        name="default",
+        app_type=AppType.TP_VIRTUAL,
+        garmin_username=garmin_username or "",
+        garmin_password=garmin_password or "",
+        fitfiles_path=Path(fitfiles_path) if fitfiles_path else Path.home(),
+    )
+
+    # Create new multi-profile config
+    new_config = Config(profiles=[profile], default_profile="default")
+
+    _logger.info(
+        'Migration complete. Your existing settings are now in the "default" profile.'
+    )
+    return new_config
 
 
 class ConfigManager:
@@ -141,9 +319,14 @@ class ConfigManager:
     def _load_config(self) -> Config:
         """Load configuration from file or create new Config if file doesn't exist.
 
+        Automatically migrates legacy single-profile configs (v1.2.4 and earlier)
+        to multi-profile format. The migration is transparent and preserves all
+        existing settings in a "default" profile. Migrated configs are automatically
+        saved back to disk in the new format.
+
         Returns:
             Loaded Config object if file exists and contains valid JSON,
-            otherwise a new empty Config object.
+            otherwise a new empty Config object with no profiles.
 
         Note:
             Creates an empty config file if one doesn't exist.
@@ -152,9 +335,21 @@ class ConfigManager:
 
         with self.config_file.open("r") as f:
             if self.config_file.stat().st_size == 0:
-                return Config()
+                # Empty file - return empty config
+                return Config(profiles=[], default_profile=None)
             else:
-                return Config(**json.load(f))
+                # Load from JSON and migrate if necessary
+                config_dict = json.load(f)
+                was_legacy = "profiles" not in config_dict
+                config = migrate_legacy_config(config_dict)
+
+                # Save migrated config back to file if migration occurred
+                if was_legacy:
+                    _logger.debug("Saving migrated config to file")
+                    with self.config_file.open("w") as fw:
+                        json.dump(asdict(config), fw, indent=2, cls=PathEncoder)
+
+                return config
 
     def save_config(self) -> None:
         """Save current configuration to file.
@@ -190,10 +385,16 @@ class ConfigManager:
         if excluded_keys is None:
             excluded_keys = []
 
+        # Get default profile for validation
+        default_profile = self.config.get_default_profile()
+        if not default_profile:
+            _logger.error("No default profile configured")
+            return False
+
         missing_vals = []
         for k in self.config_keys:
             if (
-                not hasattr(self.config, k) or getattr(self.config, k) is None
+                not hasattr(default_profile, k) or getattr(default_profile, k) is None
             ) and k not in excluded_keys:
                 missing_vals.append(k)
 
@@ -249,25 +450,41 @@ class ConfigManager:
         if excluded_keys is None:
             excluded_keys = []
 
+        # Get or create default profile
+        default_profile = self.config.get_default_profile()
+        if not default_profile:
+            # Create a default profile if none exists
+            default_profile = Profile(
+                name="default",
+                app_type=AppType.TP_VIRTUAL,
+                garmin_username="",
+                garmin_password="",
+                fitfiles_path=Path.home(),
+            )
+            self.config.profiles.append(default_profile)
+            self.config.default_profile = "default"
+
         for k in self.config_keys:
             if (
-                getattr(self.config, k) is None or overwrite_existing_vals
+                getattr(default_profile, k) is None
+                or not getattr(default_profile, k)
+                or overwrite_existing_vals
             ) and k not in excluded_keys:
                 valid_input = False
                 while not valid_input:
                     try:
                         if (
-                            not hasattr(self.config, k)
-                            or getattr(self.config, k) is None
+                            not hasattr(default_profile, k)
+                            or getattr(default_profile, k) is None
                         ):
                             _logger.warning(f'Required value "{k}" not found in config')
                         msg = f'Enter value to use for "{k}"'
 
-                        if hasattr(self.config, k) and getattr(self.config, k):
-                            msg += f'\nor press enter to use existing value of "{getattr(self.config, k)}"'
+                        if hasattr(default_profile, k) and getattr(default_profile, k):
+                            msg += f'\nor press enter to use existing value of "{getattr(default_profile, k)}"'
                             if k == "garmin_password":
                                 msg = msg.replace(
-                                    getattr(self.config, k), "<**hidden**>"
+                                    getattr(default_profile, k), "<**hidden**>"
                                 )
 
                         if k != "fitfiles_path":
@@ -278,18 +495,22 @@ class ConfigManager:
                         else:
                             val = str(
                                 get_fitfiles_path(
-                                    Path(self.config.fitfiles_path).parent.parent
-                                    if self.config.fitfiles_path
+                                    Path(
+                                        getattr(default_profile, "fitfiles_path")
+                                    ).parent.parent
+                                    if getattr(default_profile, "fitfiles_path")
                                     else None
                                 )
                             )
 
                         if val:
                             valid_input = True
-                            setattr(self.config, k, val)
-                        elif hasattr(self.config, k) and getattr(self.config, k):
+                            setattr(default_profile, k, val)
+                        elif hasattr(default_profile, k) and getattr(
+                            default_profile, k
+                        ):
                             valid_input = True
-                            val = getattr(self.config, k)
+                            val = getattr(default_profile, k)
                         else:
                             _logger.warning(
                                 "Entered input was not valid, please try again (or press Ctrl-C to cancel)"
@@ -303,11 +524,11 @@ class ConfigManager:
 
         config_content = json.dumps(asdict(self.config), indent=2, cls=PathEncoder)
         if (
-            hasattr(self.config, "garmin_password")
-            and getattr(self.config, "garmin_password") is not None
+            hasattr(default_profile, "garmin_password")
+            and getattr(default_profile, "garmin_password") is not None
         ):
             config_content = config_content.replace(
-                cast(str, self.config.garmin_password), "<**hidden**>"
+                cast(str, default_profile.garmin_password), "<**hidden**>"
             )
         _logger.info(f"Config file is now:\n{config_content}")
 
@@ -442,5 +663,506 @@ def get_tpv_folder(default_path: Path | None) -> Path:
     return Path(TPVPath)
 
 
+class ProfileManager:
+    """Manages profile CRUD operations and TUI interactions.
+
+    Provides methods for creating, reading, updating, and deleting profiles,
+    as well as interactive TUI wizards for profile management.
+
+    Attributes:
+        config_manager: Reference to the global ConfigManager instance.
+    """
+
+    def __init__(self, config_manager: ConfigManager):
+        """Initialize ProfileManager with config manager reference.
+
+        Args:
+            config_manager: The ConfigManager instance to use for persistence.
+        """
+        self.config_manager = config_manager
+
+    def create_profile(
+        self,
+        name: str,
+        app_type: AppType,
+        garmin_username: str,
+        garmin_password: str,
+        fitfiles_path: Path,
+    ) -> Profile:
+        """Create a new profile and add it to config.
+
+        Args:
+            name: Unique profile name.
+            app_type: Type of trainer application.
+            garmin_username: Garmin Connect email.
+            garmin_password: Garmin Connect password.
+            fitfiles_path: Path to FIT files directory.
+
+        Returns:
+            The newly created Profile object.
+
+        Raises:
+            ValueError: If profile name already exists.
+
+        Examples:
+            >>> manager = ProfileManager(config_manager)
+            >>> profile = manager.create_profile(
+            ...     "zwift",
+            ...     AppType.ZWIFT,
+            ...     "user@example.com",
+            ...     "secret",
+            ...     Path("/path/to/fitfiles")
+            ... )
+        """
+        # Check if profile name already exists
+        if self.config_manager.config.get_profile(name):
+            raise ValueError(f'Profile "{name}" already exists')
+
+        # Create new profile
+        profile = Profile(
+            name=name,
+            app_type=app_type,
+            garmin_username=garmin_username,
+            garmin_password=garmin_password,
+            fitfiles_path=fitfiles_path,
+        )
+
+        # Add to config and save
+        self.config_manager.config.profiles.append(profile)
+        self.config_manager.save_config()
+
+        _logger.info(f'Created profile "{name}"')
+        return profile
+
+    def get_profile(self, name: str) -> Profile | None:
+        """Get profile by name.
+
+        Args:
+            name: The profile name to retrieve.
+
+        Returns:
+            Profile object if found, None otherwise.
+        """
+        return self.config_manager.config.get_profile(name)
+
+    def list_profiles(self) -> list[Profile]:
+        """Get list of all profiles.
+
+        Returns:
+            List of all Profile objects.
+        """
+        return self.config_manager.config.profiles
+
+    def update_profile(
+        self,
+        name: str,
+        app_type: AppType | None = None,
+        garmin_username: str | None = None,
+        garmin_password: str | None = None,
+        fitfiles_path: Path | None = None,
+        new_name: str | None = None,
+    ) -> Profile:
+        """Update an existing profile.
+
+        Args:
+            name: Name of profile to update.
+            app_type: New app type (optional).
+            garmin_username: New Garmin username (optional).
+            garmin_password: New Garmin password (optional).
+            fitfiles_path: New FIT files path (optional).
+            new_name: New profile name (optional).
+
+        Returns:
+            The updated Profile object.
+
+        Raises:
+            ValueError: If profile not found or new name already exists.
+        """
+        profile = self.get_profile(name)
+        if not profile:
+            raise ValueError(f'Profile "{name}" not found')
+
+        # Check if new name conflicts
+        if new_name and new_name != name:
+            if self.get_profile(new_name):
+                raise ValueError(f'Profile "{new_name}" already exists')
+            profile.name = new_name
+
+        # Update fields if provided
+        if app_type is not None:
+            profile.app_type = app_type
+        if garmin_username is not None:
+            profile.garmin_username = garmin_username
+        if garmin_password is not None:
+            profile.garmin_password = garmin_password
+        if fitfiles_path is not None:
+            profile.fitfiles_path = fitfiles_path
+
+        # Update default_profile if name changed
+        if new_name and self.config_manager.config.default_profile == name:
+            self.config_manager.config.default_profile = new_name
+
+        self.config_manager.save_config()
+        _logger.info(f'Updated profile "{new_name or name}"')
+        return profile
+
+    def delete_profile(self, name: str) -> None:
+        """Delete a profile.
+
+        Args:
+            name: Name of profile to delete.
+
+        Raises:
+            ValueError: If profile not found or trying to delete the only profile.
+        """
+        profile = self.get_profile(name)
+        if not profile:
+            raise ValueError(f'Profile "{name}" not found')
+
+        # Prevent deleting the only profile
+        if len(self.config_manager.config.profiles) == 1:
+            raise ValueError("Cannot delete the only profile")
+
+        # Remove from profiles list
+        self.config_manager.config.profiles.remove(profile)
+
+        # Update default if we deleted the default profile
+        if self.config_manager.config.default_profile == name:
+            # Set first remaining profile as default
+            self.config_manager.config.default_profile = (
+                self.config_manager.config.profiles[0].name
+            )
+
+        self.config_manager.save_config()
+        _logger.info(f'Deleted profile "{name}"')
+
+    def set_default_profile(self, name: str) -> None:
+        """Set a profile as the default.
+
+        Args:
+            name: Name of profile to set as default.
+
+        Raises:
+            ValueError: If profile not found.
+        """
+        profile = self.get_profile(name)
+        if not profile:
+            raise ValueError(f'Profile "{name}" not found')
+
+        self.config_manager.config.default_profile = name
+        self.config_manager.save_config()
+        _logger.info(f'Set "{name}" as default profile')
+
+    def display_profiles_table(self) -> None:
+        """Display all profiles in a Rich table.
+
+        Shows profile name, app type, Garmin username, and FIT files path
+        in a formatted table. Marks the default profile with ⭐.
+        """
+        console = Console()
+        table = Table(
+            title="📋 FIT File Faker - Profiles",
+            show_header=True,
+            header_style="bold cyan",
+        )
+
+        table.add_column("Name", style="green", no_wrap=True)
+        table.add_column("App", style="blue")
+        table.add_column("Garmin User", style="yellow")
+        table.add_column("FIT Path", style="magenta")
+
+        profiles = self.list_profiles()
+        if not profiles:
+            console.print("[yellow]No profiles configured yet.[/yellow]")
+            return
+
+        for profile in profiles:
+            # Mark default profile with star
+            name_display = profile.name
+            if profile.name == self.config_manager.config.default_profile:
+                name_display = f"{profile.name} ⭐"
+
+            # Format app type for display using detector's short name
+            from fit_file_faker.app_registry import get_detector
+
+            detector = get_detector(profile.app_type)
+            app_display = detector.get_short_name()
+
+            # Truncate long paths
+            path_str = str(profile.fitfiles_path)
+            if len(path_str) > 40:
+                path_str = "..." + path_str[-37:]
+
+            table.add_row(name_display, app_display, profile.garmin_username, path_str)
+
+        console.print(table)
+
+    def interactive_menu(self) -> None:
+        """Display interactive profile management menu.
+
+        Shows profile table and presents menu options for creating,
+        editing, deleting profiles, and setting default.
+        """
+        while True:
+            console = Console()
+            console.print()  # Blank line
+            self.display_profiles_table()
+            console.print()  # Blank line
+
+            choices = [
+                "Create new profile",
+                "Edit existing profile",
+                "Delete profile",
+                "Set default profile",
+                "Exit",
+            ]
+
+            action = questionary.select(
+                "What would you like to do?",
+                choices=choices,
+                style=questionary.Style([("highlighted", "fg:cyan bold")]),
+            ).ask()
+
+            if not action or action == "Exit":
+                break
+
+            try:
+                if action == "Create new profile":
+                    self.create_profile_wizard()
+                elif action == "Edit existing profile":
+                    self.edit_profile_wizard()
+                elif action == "Delete profile":
+                    self.delete_profile_wizard()
+                elif action == "Set default profile":
+                    self.set_default_wizard()
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[yellow]Operation cancelled.[/yellow]")
+                continue
+
+    def create_profile_wizard(self) -> Profile | None:
+        """Interactive wizard for creating a new profile.
+
+        Follows app-first flow:
+        1. Select app type
+        2. Auto-detect directory (with confirm/override)
+        3. Enter Garmin credentials
+        4. Enter profile name
+
+        Returns:
+            The newly created Profile, or None if cancelled.
+        """
+        from fit_file_faker.app_registry import get_detector
+
+        console = Console()
+        console.print("\n[bold cyan]Create New Profile[/bold cyan]")
+
+        # Step 1: Select app type
+        app_choices = [
+            questionary.Choice("TrainingPeaks Virtual", AppType.TP_VIRTUAL),
+            questionary.Choice("Zwift", AppType.ZWIFT),
+            questionary.Choice("MyWhoosh", AppType.MYWHOOSH),
+            questionary.Choice("Custom (manual path)", AppType.CUSTOM),
+        ]
+
+        app_type = questionary.select(
+            "Which trainer app will this profile use?", choices=app_choices
+        ).ask()
+
+        if not app_type:
+            return None
+
+        # Step 2: Directory detection
+        detector = get_detector(app_type)
+        suggested_path = detector.get_default_path()
+
+        if suggested_path:
+            console.print(
+                f"\n[green]✓ Found {detector.get_display_name()} directory:[/green]"
+            )
+            console.print(f"  {suggested_path}")
+            use_detected = questionary.confirm(
+                "Use this directory?", default=True
+            ).ask()
+
+            if use_detected:
+                fitfiles_path = suggested_path
+            else:
+                path_input = questionary.path("Enter FIT files directory path:").ask()
+                if not path_input:
+                    return None
+                fitfiles_path = Path(path_input)
+        else:
+            console.print(
+                f"\n[yellow]Could not auto-detect {detector.get_display_name()} directory[/yellow]"
+            )
+            path_input = questionary.path("Enter FIT files directory path:").ask()
+            if not path_input:
+                return None
+            fitfiles_path = Path(path_input)
+
+        # Step 3: Garmin credentials
+        garmin_username = questionary.text(
+            "Enter Garmin Connect email:", validate=lambda x: len(x) > 0
+        ).ask()
+        if not garmin_username:
+            return None
+
+        garmin_password = questionary.password(
+            "Enter Garmin Connect password:", validate=lambda x: len(x) > 0
+        ).ask()
+        if not garmin_password:
+            return None
+
+        # Step 4: Profile name
+        suggested_name = app_type.value.split("_")[0].lower()
+        profile_name = questionary.text(
+            "Enter profile name:", default=suggested_name, validate=lambda x: len(x) > 0
+        ).ask()
+        if not profile_name:
+            return None
+
+        # Create the profile
+        try:
+            profile = self.create_profile(
+                name=profile_name,
+                app_type=app_type,
+                garmin_username=garmin_username,
+                garmin_password=garmin_password,
+                fitfiles_path=fitfiles_path,
+            )
+            console.print(
+                f"\n[green]✓ Profile '{profile_name}' created successfully![/green]"
+            )
+            return profile
+        except ValueError as e:
+            console.print(f"\n[red]✗ Error: {e}[/red]")
+            return None
+
+    def edit_profile_wizard(self) -> None:
+        """Interactive wizard for editing an existing profile."""
+        console = Console()
+
+        profiles = self.list_profiles()
+        if not profiles:
+            console.print("[yellow]No profiles to edit.[/yellow]")
+            return
+
+        # Select profile to edit
+        profile_choices = [p.name for p in profiles]
+        profile_name = questionary.select(
+            "Select profile to edit:", choices=profile_choices
+        ).ask()
+
+        if not profile_name:
+            return
+
+        profile = self.get_profile(profile_name)
+        if not profile:
+            return
+
+        console.print(f"\n[bold cyan]Editing Profile: {profile_name}[/bold cyan]")
+        console.print("[dim]Leave blank to keep current value[/dim]\n")
+
+        # Ask which fields to update
+        new_name = questionary.text(f"Profile name [{profile.name}]:", default="").ask()
+
+        new_username = questionary.text(
+            f"Garmin username [{profile.garmin_username}]:", default=""
+        ).ask()
+
+        new_password = questionary.password("Garmin password [****]:", default="").ask()
+
+        new_path = questionary.path(
+            f"FIT files path [{profile.fitfiles_path}]:", default=""
+        ).ask()
+
+        # Update profile with provided values
+        try:
+            self.update_profile(
+                name=profile_name,
+                new_name=new_name if new_name else None,
+                garmin_username=new_username if new_username else None,
+                garmin_password=new_password if new_password else None,
+                fitfiles_path=Path(new_path) if new_path else None,
+            )
+            console.print("\n[green]✓ Profile updated successfully![/green]")
+        except ValueError as e:
+            console.print(f"\n[red]✗ Error: {e}[/red]")
+
+    def delete_profile_wizard(self) -> None:
+        """Interactive wizard for deleting a profile with confirmation."""
+        console = Console()
+
+        profiles = self.list_profiles()
+        if not profiles:
+            console.print("[yellow]No profiles to delete.[/yellow]")
+            return
+
+        if len(profiles) == 1:
+            console.print("[yellow]Cannot delete the only profile.[/yellow]")
+            return
+
+        # Select profile to delete
+        profile_choices = [p.name for p in profiles]
+        profile_name = questionary.select(
+            "Select profile to delete:", choices=profile_choices
+        ).ask()
+
+        if not profile_name:
+            return
+
+        # Confirm deletion
+        confirm = questionary.confirm(
+            f'Are you sure you want to delete profile "{profile_name}"?',
+            default=False,
+        ).ask()
+
+        if not confirm:
+            console.print("[yellow]Deletion cancelled.[/yellow]")
+            return
+
+        # Delete the profile
+        try:
+            self.delete_profile(profile_name)
+            console.print(
+                f"\n[green]✓ Profile '{profile_name}' deleted successfully![/green]"
+            )
+        except ValueError as e:
+            console.print(f"\n[red]✗ Error: {e}[/red]")
+
+    def set_default_wizard(self) -> None:
+        """Interactive wizard for setting the default profile."""
+        console = Console()
+
+        profiles = self.list_profiles()
+        if not profiles:
+            console.print("[yellow]No profiles available.[/yellow]")
+            return
+
+        # Select profile to set as default
+        profile_choices = [p.name for p in profiles]
+        current_default = self.config_manager.config.default_profile
+
+        profile_name = questionary.select(
+            f"Select default profile (current: {current_default}):",
+            choices=profile_choices,
+        ).ask()
+
+        if not profile_name:
+            return
+
+        # Set as default
+        try:
+            self.set_default_profile(profile_name)
+            console.print(
+                f"\n[green]✓ '{profile_name}' is now the default profile![/green]"
+            )
+        except ValueError as e:
+            console.print(f"\n[red]✗ Error: {e}[/red]")
+
+
 # Global configuration manager instance
 config_manager = ConfigManager()
+
+# Global profile manager instance
+profile_manager = ProfileManager(config_manager)
