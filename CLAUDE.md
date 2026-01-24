@@ -346,6 +346,14 @@ Releases are automated via `.github/workflows/publish_and_release.yml`:
 3. Version is defined in `pyproject.toml` and must be manually updated before tagging
 
 To release a new version:
+
+**Option 1: Using the release script (Recommended)**
+```bash
+./release.sh 2.0.1 "Fix changelog generation and dependencies"
+```
+
+**Option 2: Manual release**
 1. Update version in `pyproject.toml`
-2. Commit and push
-3. Create and push a git tag: `git tag v1.2.4 && git push origin v1.2.4`
+2. Commit: `git commit -am "chore: bump version to 1.2.4"`
+3. Tag: `git tag v1.2.4 -m "Release v1.2.4"`
+4. Push: `git push origin main && git push origin v1.2.4`

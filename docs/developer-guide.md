@@ -627,6 +627,27 @@ Releases are automated via `.github/workflows/publish_and_release.yml`:
 
 ### To Release a New Version
 
+**Option 1: Using the release script (Recommended)**
+
+The `release.sh` script automates the entire release process:
+
+```bash
+# Interactive release with custom message
+./release.sh 2.0.1 "Fix changelog generation and dependencies"
+
+# Quick release with default message
+./release.sh 2.0.1
+```
+
+The script will:
+1. Validate version format and git status
+2. Update version in `pyproject.toml`
+3. Commit the version change
+4. Create an annotated git tag
+5. Push to origin (with confirmation prompts)
+
+**Option 2: Manual release**
+
 1. **Update version** in `pyproject.toml`:
    ```toml
    version = "1.2.5"
@@ -651,12 +672,14 @@ Releases are automated via `.github/workflows/publish_and_release.yml`:
     !!! tip "Tag Messages in Changelog"
         Detailed tag messages (using the `-m` flag) will be rendered in the auto-generated changelog and GitHub Release notes. Use this to provide release highlights, breaking changes, or upgrade instructions that won't fit in individual commit messages.
 
-4. **Automated steps** (handled by GitHub Actions):
-    - Build package
-    - Publish to PyPI
-    - Create GitHub Release
-    - Generate changelog
-    - Deploy documentation
+**Automated steps** (handled by GitHub Actions):
+
+After pushing the tag, GitHub Actions will automatically:
+- Build package
+- Publish to PyPI
+- Create GitHub Release
+- Generate changelog
+- Deploy documentation
 
 ### Version Numbering
 

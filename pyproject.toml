@@ -1,6 +1,6 @@
 [project]
 name = "fit-file-faker"
-version = "2.0.1"
+version = "2.0.0"
 description = "Modify and auto-upload FIT files from third-party platforms to unlock Garmin Connect features"
 authors = [
   { name="Josh Taillon", email="jat255@gmail.com" },
@@ -94,11 +94,7 @@ See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on 
 # Body template for each version section
 body = """
 {% if version %}\
-    {% if git_tag -%}
     ## [{{ version | trim_start_matches(pat="v") }}](https://github.com/jat255/fit-file-faker/releases/tag/{{ version }}) - ({{ timestamp | date(format="%Y-%m-%d") }})
-    {% else -%}
-    ## [Unreleased] - {{ version }}
-    {% endif -%}
 {% else %}\
     ## [Unreleased]
 {% endif %}\

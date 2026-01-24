@@ -40,6 +40,7 @@ jobs:
       - name: Generate changelog with git-cliff
         uses: orhun/git-cliff-action@v4
         with:
+          config: pyproject.toml
           args: --verbose
         env:
           OUTPUT: docs/changelog.md
