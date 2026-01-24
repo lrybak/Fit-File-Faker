@@ -5,14 +5,64 @@ All notable changes to FIT File Faker are documented here.
 This changelog is automatically generated from git commit messages using [git-cliff](https://git-cliff.org/).
 See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on GitHub for downloadable releases.
 
-## [Unreleased]
+## [2.0.3](https://github.com/jat255/fit-file-faker/releases/tag/v2.0.3) - (2026-01-24)
+
+### Features
+
+- add draft GitHub release creation to release script ([99072e7](https://github.com/jat255/Fit-File-Faker/commit/99072e7e2de780e020b8dedda0431809dcf0c1a8))
+
 
 ### Bug Fixes
+
+- force uv to use matrix Python version in CI tests ([88dfc11](https://github.com/jat255/Fit-File-Faker/commit/88dfc11761c1ad68c83df129aad31d3405742859))
+
+- properly install dependencies for release pipeline mkdocs build ([4bf7258](https://github.com/jat255/Fit-File-Faker/commit/4bf72587094378ca4280b49d3d783647f3e9b426))
+
+- correct git-cliff template and workflow configuration ([8ad5b4d](https://github.com/jat255/Fit-File-Faker/commit/8ad5b4d54bda75da43529fe03dbc1afe919097f9))
 
 - add missing mkdocs-autorefs dependency and fix Windows CI compatibility ([1269fed](https://github.com/jat255/Fit-File-Faker/commit/1269fed94b21285893f674bfe84fdb358b206204))
 
 
+### Documentation
 
+- update changelog with updated git-cliff config ([0fdefaa](https://github.com/jat255/Fit-File-Faker/commit/0fdefaa8190c7288ed606672f1117501f32901fc))
+
+- update changelog for v2.0.0 ([fb22c3c](https://github.com/jat255/Fit-File-Faker/commit/fb22c3c8d0da420fa0e5583d2bc5f0481dbed353))
+
+
+### CI/CD
+
+- ci: move draft release creation to publish workflow and improve
+release script
+
+Move GitHub draft release creation from release.sh to the publish
+workflow to ensure releases are only created after successful PyPI
+publication. This prevents draft releases for failed builds.
+
+Changes to release.sh:
+- Add comprehensive help system with --help flag
+- Remove draft release creation logic (now in workflow)
+- Update next steps documentation to reflect automated process
+- Improve error messages with help hint
+
+Changes to publish_and_release.yml:
+- Add --draft flag to gh release create command
+- Ensures draft release is created after successful PyPI upload
+
+Benefits:
+- No draft releases for failed builds
+- Better user experience with built-in help
+- Clearer separation of concerns (script vs CI) ([c68fb94](https://github.com/jat255/Fit-File-Faker/commit/c68fb948832b73e55b09a965ebfceb3870a5c3cc))
+
+
+### Build System
+
+- replace gitlint with commitlint for Windows compatibility ([506f9c9](https://github.com/jat255/Fit-File-Faker/commit/506f9c97377701b53e853c745189081dd0940946))
+
+
+### Miscellaneous Tasks
+
+- bump version to 2.0.3 ([e526ad8](https://github.com/jat255/Fit-File-Faker/commit/e526ad858b27a9ff938b8d6f9ac4ea0eaeff9406))
 
 ## [2.0.0](https://github.com/jat255/fit-file-faker/releases/tag/v2.0.0) - (2026-01-24)
 
