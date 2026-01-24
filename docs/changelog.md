@@ -12,9 +12,7 @@ See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on 
 - add missing mkdocs-autorefs dependency and fix Windows CI compatibility ([1269fed](https://github.com/jat255/Fit-File-Faker/commit/1269fed94b21285893f674bfe84fdb358b206204))
 
 
-### Documentation
 
-- update changelog for v2.0.0 ([fb22c3c](https://github.com/jat255/Fit-File-Faker/commit/fb22c3c8d0da420fa0e5583d2bc5f0481dbed353))
 
 ## [2.0.0](https://github.com/jat255/fit-file-faker/releases/tag/v2.0.0) - (2026-01-24)
 
