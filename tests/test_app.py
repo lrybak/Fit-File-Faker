@@ -710,6 +710,31 @@ class TestCLIIntegration:
         assert exc_info.value.code == 0
 
     @patch("fit_file_faker.app.fit_editor")
+    @patch("sys.argv", ["fit-file-faker", "--version"])
+    def test_version_argument(self, mock_fit_editor, capsys):
+        """Test that --version displays version and release date and exits."""
+        from importlib.metadata import version
+
+        from fit_file_faker import __version_date__
+        from fit_file_faker.app import run
+
+        with pytest.raises(SystemExit) as exc_info:
+            run()
+
+        # --version should exit with code 0
+        assert exc_info.value.code == 0
+
+        # Check that version and date were printed to stdout
+        captured = capsys.readouterr()
+        expected_version = version("fit-file-faker")
+        assert "fit-file-faker" in captured.out
+        assert expected_version in captured.out
+        assert __version_date__ in captured.out
+        assert (
+            "(" in captured.out and ")" in captured.out
+        )  # Check date is in parentheses
+
+    @patch("fit_file_faker.app.fit_editor")
     def test_version_check_passes(self, mock_fit_editor):
         """Test that Python version check passes on supported versions."""
         from fit_file_faker.app import run

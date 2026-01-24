@@ -47,9 +47,10 @@ show_help() {
     echo -e "${BLUE}DESCRIPTION:${NC}"
     echo "    Automates the release process for Fit File Faker by:"
     echo "      1. Updating version in pyproject.toml"
-    echo "      2. Committing the version change"
-    echo "      3. Creating an annotated Git tag"
-    echo "      4. Pushing commits and tag to origin"
+    echo "      2. Updating release date in __init__.py"
+    echo "      3. Committing the version change"
+    echo "      4. Creating an annotated Git tag"
+    echo "      5. Pushing commits and tag to origin"
     echo
     echo -e "${BLUE}EXAMPLES:${NC}"
     echo -e "    ${YELLOW}# Release with default message${NC}"
@@ -134,6 +135,18 @@ else
 fi
 success "Version updated to ${VERSION}"
 
+# Step 1b: Update version date in __init__.py
+RELEASE_DATE=$(date +%Y-%m-%d)
+info "Updating release date in __init__.py to ${RELEASE_DATE}..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    sed -i '' "s/^__version_date__ = \".*\"/__version_date__ = \"${RELEASE_DATE}\"/" fit_file_faker/__init__.py
+else
+    # Linux
+    sed -i "s/^__version_date__ = \".*\"/__version_date__ = \"${RELEASE_DATE}\"/" fit_file_faker/__init__.py
+fi
+success "Release date updated to ${RELEASE_DATE}"
+
 # Step 2: Update lockfile
 info "Updating uv.lock..."
 uv lock
@@ -141,14 +154,14 @@ success "Lockfile updated"
 
 # Step 3: Show the diff
 info "Changes:"
-git diff pyproject.toml uv.lock
+git diff pyproject.toml fit_file_faker/__init__.py uv.lock
 
 # Step 4: Commit version change
 echo
 read -p "Commit these changes? (Y/n) " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-    git add pyproject.toml uv.lock
+    git add pyproject.toml fit_file_faker/__init__.py uv.lock
     git commit -m "chore: bump version to ${VERSION}"
     success "Version change committed"
 else

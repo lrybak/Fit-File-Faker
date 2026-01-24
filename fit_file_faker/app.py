@@ -29,6 +29,7 @@ import json
 import logging
 import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Optional, cast
@@ -59,6 +60,7 @@ _logger.setLevel(logging.INFO)
 logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 logging.getLogger("oauth1_auth").setLevel(logging.WARNING)
 
+from . import __version_date__
 from .config import config_manager, dirs, profile_manager, Profile
 from .fit_editor import fit_editor
 from .utils import apply_fit_tool_patch
@@ -630,6 +632,12 @@ def run():
     )
     parser.add_argument(
         "-v", "--verbose", help="increase verbosity of log output", action="store_true"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {version('fit-file-faker')} (released {__version_date__})",
+        help="show program version and exit",
     )
     args = parser.parse_args()
 
