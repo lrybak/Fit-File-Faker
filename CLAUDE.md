@@ -327,8 +327,8 @@ See `TESTING.md` for comprehensive documentation.
 
 ALL commits MUST follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
 - Format: `<type>: <description>` (e.g., `feat: add new feature`, `fix: resolve bug`)
-- Allowed types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`, `build`, `perf`, `style`, `revert`
-- This is enforced by pre-commit hooks (gitlint) and required for automatic changelog generation
+- Allowed types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`, `build`, `perf`, `style`, `revert`, `plan`
+- This is enforced by pre-commit hooks (commitlint) and required for automatic changelog generation
 - **Never** create commits that don't follow this format
 
 When making changes:
