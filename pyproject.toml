@@ -1,6 +1,6 @@
 [project]
 name = "fit-file-faker"
-version = "2.0.0"
+version = "2.0.1"
 description = "Modify and auto-upload FIT files from third-party platforms to unlock Garmin Connect features"
 authors = [
   { name="Josh Taillon", email="jat255@gmail.com" },
@@ -31,12 +31,13 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-xdist>=3.5.0",
     "pre-commit>=4.0.0",
-    "gitlint>=0.19.1",
+    "gitlint>=0.19.1; sys_platform != 'win32'",
 ]
 docs = [
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.0",
     "mkdocs-minify-plugin>=0.8.0",
+    "mkdocs-autorefs>=1.0.0",
     "mkdocstrings[python]>=0.24.0",
     "mkdocstrings-python>=1.7.0",
     "livereload>=2.7.1",
