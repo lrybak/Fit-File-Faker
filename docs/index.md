@@ -12,7 +12,7 @@
 
 </div>
 
-This application allows you to easily modify [FIT](https://developer.garmin.com/fit/overview/) files to make them appear to come from a Garmin device (Edge 830, currently) and upload them to Garmin Connect using the [`garth`](https://github.com/matin/garth/) library. The FIT editing is done using Stages Cycling's [`fit_tool`](https://bitbucket.org/stagescycling/python_fit_tool/src/main/) library.
+This application allows you to easily modify [FIT](https://developer.garmin.com/fit/overview/) files to make them appear to come from a Garmin device (Edge 830 by default, or any supported Garmin cycling device) and upload them to Garmin Connect using the [`garth`](https://github.com/matin/garth/) library. The FIT editing is done using Stages Cycling's [`fit_tool`](https://bitbucket.org/stagescycling/python_fit_tool/src/main/) library.
 
 !!! support "Support This Project"
     If FIT File Faker saves you time or enhances your training workflow, consider [buying me a coffee ☕](https://ko-fi.com/josh851356). Your support helps maintain and improve this project!
@@ -142,11 +142,17 @@ As of version 2.0.0, FIT File Faker now supports **multi-profile configuration**
     fit-file-faker --config-menu
     ```
 
+    <div align="center">
+      <img src="vhs_gifs/config_new.gif" alt="Creating a new profile" width="800" />
+      <p><em>Creating a new profile with the interactive menu</em></p>
+    </div>
+
     This supports:
-    
+
     - **Multiple Garmin accounts** with isolated credentials
     - **Multiple trainer apps** (TPV, Zwift, MyWhoosh)
     - **Auto-detection** of FIT file directories
+    - **Customizable device simulation** (Edge 830, Edge 1030, Tacx, etc.)
     - **Profile-specific monitoring** and uploads
 
 
@@ -165,18 +171,79 @@ For backward compatibility, the tool still supports the legacy single-profile fo
 !!! warning "Automatic Migration"
     When you first run v2.0.0+, legacy configs are automatically migrated to the multi-profile format with a "default" profile.
 
+## Device Simulation
 
-### Initial Setup (Legacy)
+By default, FIT File Faker modifies files to appear as if they came from a **Garmin Edge 830**. However, each profile can be configured to simulate a different Garmin device.
 
-The `-s` flag still works for backward compatibility but now launches the profile manager:
+### Supported Devices
 
-```bash
-fit-file-faker -s
+The tool supports simulation of any Garmin cycling/training device, including:
+
+- **Edge Series**: Edge 130, Edge 520, Edge 530, Edge 830, Edge 1030, Edge 1040, etc.
+- **Tacx Trainers**: Tacx NEO series and other Tacx smart trainers
+- **Training Devices**: Various other Garmin training computers
+
+!!! info "Device Selection"
+    During profile creation or editing, you can optionally customize which Garmin device to simulate. The tool presents a filtered list of ~66 supported Garmin cycling and training devices.
+
+### Customizing Device Simulation
+
+When creating or editing a profile via `--config-menu`, you'll be prompted:
+
+```
+? Customize device simulation? (default: Garmin Edge 830) (y/N)
 ```
 
-For new users, it's recommended to use `--config-menu` for the full multi-profile experience.
+If you select **Yes**, you can:
+
+1. **Choose from a list** of supported Garmin devices (Edge, Tacx, Training series)
+2. **Enter a custom numeric device ID** for newer devices not yet in the list
+
+!!! tip "Custom Device IDs"
+    If you enter a numeric device ID that's not recognized, the tool will show a warning but still create/update the profile. This allows using newer Garmin devices that may not be in the library yet.
+
+### Example: Different Devices for Different Profiles
+
+```json
+{
+  "profiles": [
+    {
+      "name": "tpv",
+      "app_type": "tp_virtual",
+      "garmin_username": "user@example.com",
+      "garmin_password": "secret",
+      "fitfiles_path": "/path/to/tpv",
+      "manufacturer": 1,
+      "device": 3122  // Edge 830 (default)
+    },
+    {
+      "name": "zwift",
+      "app_type": "zwift",
+      "garmin_username": "user@example.com",
+      "garmin_password": "secret",
+      "fitfiles_path": "/path/to/zwift",
+      "manufacturer": 1,
+      "device": 2713  // Edge 1030
+    }
+  ]
+}
+```
+
+### Why Customize Device Simulation?
+
+- **Match your actual device**: If you own an Edge 1030, simulate that device for consistency
+- **Testing**: Try different devices to see how Garmin Connect responds
+- **Feature compatibility**: Some Garmin devices may enable different features in Garmin Connect
+
+!!! note "Backward Compatibility"
+    Existing profiles without device settings automatically default to Edge 830, maintaining the original behavior.
 
 ## Usage
+
+<div align="center">
+  <img src="vhs_gifs/features.gif" alt="FIT File Faker Features Demo" width="800" />
+  <p><em>Overview of FIT File Faker features and commands</em></p>
+</div>
 
 ### Command-line Options
 
@@ -187,7 +254,7 @@ fit-file-faker -h
 ```
 
 ```
-usage: fit-file-faker [-h] [-s] [--profile PROFILE] [--list-profiles] [--config-menu] [-u] [-ua] [-p] [-m] [-d] [-v] [input_path]
+usage: fit-file-faker [-h] [--profile PROFILE] [--list-profiles] [--config-menu] [--show-dirs] [-u] [-ua] [-p] [-m] [-d] [-v] [input_path]
 
 Tool to add Garmin device information to FIT files and upload them to Garmin Connect. Currently, only FIT files produced by TrainingPeaks Virtual (https://www.trainingpeaks.com/virtual/) and Zwift
 (https://www.zwift.com/) are supported, but it's possible others may work.
@@ -198,10 +265,10 @@ positional arguments:
 
 options:
   -h, --help           show this help message and exit
-  -s, --initial-setup  Launch the interactive profile management menu (alias for --config-menu)
   --profile PROFILE    specify which profile to use (if not specified, uses default profile)
   --list-profiles      list all available profiles and exit
   --config-menu        launch the interactive profile management menu
+  --show-dirs          show the directories used by Fit File Faker for configuration and cache
   -u, --upload         upload FIT file (after editing) to Garmin Connect
   -ua, --upload-all    upload all FIT files in directory (if they are not in "already processed" list)
   -p, --preinitialize  preinitialize the list of processed FIT files (mark all existing files in directory as already uploaded)
@@ -238,7 +305,15 @@ fit-file-faker --list-profiles
 
 # Launch interactive profile manager
 fit-file-faker --config-menu
+
+# Show directories used by FIT File Faker
+fit-file-faker --show-dirs
 ```
+
+<div align="center">
+  <img src="vhs_gifs/config_edit.gif" alt="Editing a profile" width="800" />
+  <p><em>Editing an existing profile configuration</em></p>
+</div>
 
 #### Profile Selection Priority
 
@@ -345,6 +420,16 @@ $ fit-file-faker --monitor /home/user/Documents/TPVirtual/0123456789ABCEDF/FITFi
 ## Troubleshooting
 
 If you run into problems, please [create an issue](https://github.com/jat255/Fit-File-Faker/issues/new/choose) on the GitHub repo.
+
+!!! tip "Viewing Configuration Directories"
+    Use `fit-file-faker --show-dirs` to see:
+
+    - Configuration file location
+    - Cache directory location
+    - Garmin credential directories for each profile
+    - Executable paths
+
+    This can be helpful when troubleshooting configuration or credential issues.
 
 !!! note
     As this is a side-project provided for free (as in speech and beer), support times may vary 😅.

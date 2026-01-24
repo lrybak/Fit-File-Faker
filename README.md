@@ -15,7 +15,7 @@ A Python tool to modify [FIT](https://developer.garmin.com/fit/overview/) files 
 
 > **☕ Enjoying this tool?** If FIT File Faker saves you time or enhances your training workflow, consider [buying me a coffee](https://ko-fi.com/josh851356). Your support helps maintain and improve this project!
 
-**Edit** FIT files to appear as if they came from a Garmin Edge 830 device, enabling Training Effect calculations and other Garmin features for activities from platforms like:
+**Edit** FIT files to appear as if they came from a Garmin device (Edge 830 by default, or any supported Garmin cycling device), enabling Training Effect calculations and other Garmin features for activities from platforms like:
 - [TrainingPeaks Virtual](https://www.trainingpeaks.com/virtual/)
 - [Zwift](https://www.zwift.com/)
 - [MyWhoosh](https://mywhoosh.com/)
@@ -35,6 +35,10 @@ Quick references:
 
 ## ⚡ Quick Start
 
+<div align="center">
+  <img src="docs/vhs_gifs/features.gif" alt="FIT File Faker Features Demo" width="800" />
+</div>
+
 ### Install
 ```bash
 # Using uv (recommended)
@@ -49,9 +53,14 @@ pip install fit-file-faker
 
 ### Configure
 ```bash
-# Interactive setup
-fit-file-faker -s
+# Interactive profile management menu
+fit-file-faker --config-menu
 ```
+
+<div align="center">
+  <img src="docs/vhs_gifs/config_new.gif" alt="Creating a new profile" width="800" />
+  <p><em>Creating a new profile with the interactive menu</em></p>
+</div>
 
 ### Edit & Upload
 ```bash
@@ -78,6 +87,9 @@ fit-file-faker --config-menu
 # List all profiles
 fit-file-faker --list-profiles
 
+# Show directories used for configuration and cache
+fit-file-faker --show-dirs
+
 # Use a specific profile
 fit-file-faker --profile my-profile -ua
 
@@ -85,10 +97,16 @@ fit-file-faker --profile my-profile -ua
 fit-file-faker --profile zwift -m
 ```
 
+<div align="center">
+  <img src="docs/vhs_gifs/config_edit.gif" alt="Editing a profile" width="800" />
+  <p><em>Editing an existing profile configuration</em></p>
+</div>
+
 Each profile can have:
 - **Different Garmin accounts** (credentials are isolated per profile)
 - **Different trainer apps** (TrainingPeaks Virtual, Zwift, MyWhoosh)
 - **Different FIT file directories**
+- **Different Garmin device simulation** (Edge 830, Edge 1030, Tacx, etc.)
 
 Example workflow for multiple accounts:
 ```bash
