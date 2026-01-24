@@ -136,7 +136,12 @@ jobs:
           git diff-index --quiet HEAD || git commit -m "docs: update changelog for ${{ github.ref_name }}"
           git push origin main
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.15"
+
       - name: Deploy documentation
         run: |
-          pip install mkdocs-material mkdocs-minify-plugin
-          mkdocs gh-deploy --force --clean --verbose
+          uv sync --group docs
+          uv run mkdocs gh-deploy --force --clean --verbose
