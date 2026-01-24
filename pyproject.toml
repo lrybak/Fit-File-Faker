@@ -97,12 +97,16 @@ body = """
 {% else %}\
     ## [Unreleased]
 {% endif %}\
+{% if version == "v2.0.3" %}
+
+> **Note:** Versions 2.0.1 and 2.0.2 were skipped due to CI/CD configuration issues during the release process and those versions yanked from PyPI. Please do not use them.
+{% endif %}\
 {% for group in ["Features", "Bug Fixes", "Performance", "Minor Features", "Refactoring", "Documentation", "Testing", "CI/CD", "Build System", "Styling", "Miscellaneous Tasks", "Reverts"] -%}
 {% set group_commits = commits | filter(attribute="group", value=group) -%}
 {% if group_commits %}
     ### {{ group }}
     {% for commit in group_commits %}
-        - {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message }}\
+        - {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first }}{% if commit.message is containing("\n") %}...{% endif %}\
 {% if commit.breaking %} [**BREAKING**]{% endif %} \
 ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/jat255/Fit-File-Faker/commit/{{ commit.id }}))
     {% endfor %}
@@ -139,6 +143,14 @@ commit_preprocessors = [
 
 # Commit parsers - define how to categorize commits
 commit_parsers = [
+    # Skip rules MUST come first - git-cliff processes in order
+    { message = "^docs: update changelog", skip = true },
+    { message = "^chore\\(release\\): prepare for", skip = true },
+    { message = "^chore: bump version", skip = true },
+    { message = "^chore\\(deps\\)", skip = true },
+    { message = "^chore\\(pr\\)", skip = true },
+    { message = "^chore\\(pull\\)", skip = true },
+    # Categorization rules
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
     { message = "^minor-feat", group = "Minor Features" },
@@ -147,11 +159,6 @@ commit_parsers = [
     { message = "^refactor", group = "Refactoring" },
     { message = "^style", group = "Styling" },
     { message = "^test", group = "Testing" },
-    { message = "^docs: update changelog", skip = true },
-    { message = "^chore\\(release\\): prepare for", skip = true },
-    { message = "^chore\\(deps\\)", skip = true },
-    { message = "^chore\\(pr\\)", skip = true },
-    { message = "^chore\\(pull\\)", skip = true },
     { message = "^chore", group = "Miscellaneous Tasks" },
     { message = "^ci", group = "CI/CD" },
     { message = "^build", group = "Build System" },
