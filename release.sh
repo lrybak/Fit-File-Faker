@@ -136,6 +136,39 @@ else
     exit 0
 fi
 
+# Step 6: Create draft GitHub release (if gh CLI is available)
+echo
+if command -v gh &> /dev/null; then
+    info "Creating draft GitHub release..."
+    read -p "Create draft release on GitHub? (Y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        # Generate changelog for this version
+        info "Generating release notes..."
+        
+        # Create release notes with the tag message and auto-generated notes
+        if gh release create "v${VERSION}" \
+            --draft \
+            --title "v${VERSION}" \
+            --notes "${RELEASE_MESSAGE}
+
+---
+
+**Full Changelog**: See the [changelog](https://jat255.github.io/Fit-File-Faker/changelog/) for detailed changes.
+" \
+            --verify-tag; then
+            success "Draft release created on GitHub"
+            echo
+            info "Review and publish: https://github.com/jat255/Fit-File-Faker/releases/tag/v${VERSION}"
+        else
+            warn "Failed to create GitHub release. You can create it manually."
+        fi
+    fi
+else
+    warn "GitHub CLI (gh) not found. Skipping draft release creation."
+    info "Install gh: https://cli.github.com/"
+fi
+
 # Done!
 echo
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -145,6 +178,6 @@ echo
 info "Next steps:"
 echo "  1. Monitor GitHub Actions: https://github.com/jat255/Fit-File-Faker/actions"
 echo "  2. Verify PyPI release: https://pypi.org/project/fit-file-faker/"
-echo "  3. Check GitHub Release: https://github.com/jat255/Fit-File-Faker/releases/tag/v${VERSION}"
+echo "  3. Review/publish draft release: https://github.com/jat255/Fit-File-Faker/releases"
 echo "  4. Review docs: https://jat255.github.io/Fit-File-Faker/"
 echo
