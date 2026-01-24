@@ -30,9 +30,58 @@ warn() {
     echo -e "${YELLOW}⚠${NC} $1"
 }
 
+show_help() {
+    echo -e "${GREEN}FIT File Faker Release Script${NC}"
+    echo
+    echo -e "${BLUE}USAGE:${NC}"
+    echo "    ./release.sh <version> [release-message]"
+    echo "    ./release.sh -h | --help"
+    echo
+    echo -e "${BLUE}ARGUMENTS:${NC}"
+    echo -e "    ${GREEN}<version>${NC}          Version number in X.Y.Z format (e.g., 2.0.1)"
+    echo -e "    ${GREEN}[release-message]${NC}  Optional release message (default: \"Release vX.Y.Z\")"
+    echo
+    echo -e "${BLUE}OPTIONS:${NC}"
+    echo -e "    ${GREEN}-h, --help${NC}         Show this help message"
+    echo
+    echo -e "${BLUE}DESCRIPTION:${NC}"
+    echo "    Automates the release process for Fit File Faker by:"
+    echo "      1. Updating version in pyproject.toml"
+    echo "      2. Committing the version change"
+    echo "      3. Creating an annotated Git tag"
+    echo "      4. Pushing commits and tag to origin"
+    echo
+    echo -e "${BLUE}EXAMPLES:${NC}"
+    echo -e "    ${YELLOW}# Release with default message${NC}"
+    echo "    ./release.sh 2.0.1"
+    echo
+    echo -e "    ${YELLOW}# Release with custom message${NC}"
+    echo "    ./release.sh 2.0.1 \"Fix changelog generation and dependencies\""
+    echo
+    echo -e "    ${YELLOW}# Show help${NC}"
+    echo "    ./release.sh --help"
+    echo
+    echo -e "${BLUE}REQUIREMENTS:${NC}"
+    echo "    - Git repository on main branch (recommended)"
+    echo "    - Clean working directory (recommended)"
+    echo
+    echo -e "${BLUE}NOTES:${NC}"
+    echo "    - The script will prompt for confirmation at each step"
+    echo "    - Pushing the tag triggers automated PyPI publication and GitHub release"
+    echo "    - Documentation is automatically rebuilt after release"
+    echo
+}
+
+# Check for help flag
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    show_help
+    exit 0
+fi
+
 # Check if version is provided
 if [ -z "$1" ]; then
-    error "Version number required. Usage: ./release.sh <version> [release-message]"
+    error "Version number required. Usage: ./release.sh <version> [release-message]
+       Run './release.sh --help' for more information."
 fi
 
 VERSION="$1"
@@ -85,23 +134,28 @@ else
 fi
 success "Version updated to ${VERSION}"
 
-# Step 2: Show the diff
-info "Changes to pyproject.toml:"
-git diff pyproject.toml
+# Step 2: Update lockfile
+info "Updating uv.lock..."
+uv lock
+success "Lockfile updated"
 
-# Step 3: Commit version change
+# Step 3: Show the diff
+info "Changes:"
+git diff pyproject.toml uv.lock
+
+# Step 4: Commit version change
 echo
-read -p "Commit this version change? (Y/n) " -n 1 -r
+read -p "Commit these changes? (Y/n) " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-    git add pyproject.toml
+    git add pyproject.toml uv.lock
     git commit -m "chore: bump version to ${VERSION}"
     success "Version change committed"
 else
     error "Release cancelled by user"
 fi
 
-# Step 4: Create annotated tag
+# Step 5: Create annotated tag
 info "Creating annotated tag v${VERSION}..."
 echo
 echo -e "${BLUE}Release message:${NC}"
@@ -116,7 +170,7 @@ else
     error "Release cancelled by user"
 fi
 
-# Step 5: Push to remote
+# Step 6: Push to remote
 echo
 info "Ready to push to origin..."
 echo "  - Commits on branch: ${CURRENT_BRANCH}"
@@ -136,39 +190,6 @@ else
     exit 0
 fi
 
-# Step 6: Create draft GitHub release (if gh CLI is available)
-echo
-if command -v gh &> /dev/null; then
-    info "Creating draft GitHub release..."
-    read -p "Create draft release on GitHub? (Y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        # Generate changelog for this version
-        info "Generating release notes..."
-        
-        # Create release notes with the tag message and auto-generated notes
-        if gh release create "v${VERSION}" \
-            --draft \
-            --title "v${VERSION}" \
-            --notes "${RELEASE_MESSAGE}
-
----
-
-**Full Changelog**: See the [changelog](https://jat255.github.io/Fit-File-Faker/changelog/) for detailed changes.
-" \
-            --verify-tag; then
-            success "Draft release created on GitHub"
-            echo
-            info "Review and publish: https://github.com/jat255/Fit-File-Faker/releases/tag/v${VERSION}"
-        else
-            warn "Failed to create GitHub release. You can create it manually."
-        fi
-    fi
-else
-    warn "GitHub CLI (gh) not found. Skipping draft release creation."
-    info "Install gh: https://cli.github.com/"
-fi
-
 # Done!
 echo
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -178,6 +199,6 @@ echo
 info "Next steps:"
 echo "  1. Monitor GitHub Actions: https://github.com/jat255/Fit-File-Faker/actions"
 echo "  2. Verify PyPI release: https://pypi.org/project/fit-file-faker/"
-echo "  3. Review/publish draft release: https://github.com/jat255/Fit-File-Faker/releases"
+echo "  3. Check GitHub release: https://github.com/jat255/Fit-File-Faker/releases"
 echo "  4. Review docs: https://jat255.github.io/Fit-File-Faker/"
 echo
