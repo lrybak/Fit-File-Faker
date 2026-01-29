@@ -1,0 +1,126 @@
+name: FIT File Not Recognized by Garmin
+description: Report a FIT file that is not properly recognized by Garmin Connect after processing
+title: "[FIT File Issue]: "
+labels: ["bug", "fit-file"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ IMPORTANT: FIT File Upload Required
+
+        **This issue template REQUIRES you to upload the problematic FIT file.**
+
+        Issues submitted without the FIT file attached will be **automatically closed** without investigation.
+
+        Please attach the original (unmodified) FIT file that causes issues after processing.
+
+  - type: textarea
+    id: file-upload
+    attributes:
+      label: FIT File Upload
+      description: Attach the original (unmodified) FIT file that is not being properly recognized here
+      placeholder: |
+          Drag and drop your FIT file into this box, or click the "attach" link below. You will need
+          to "zip" the file first, because GitHub will not allow uploads of plain FIT files.
+
+  - type: checkboxes
+    id: requirements
+    attributes:
+      label: Prerequisites
+      description: Please confirm you understand the requirements
+      options:
+        - label: I have attached the original FIT file that fails to be recognized by Garmin Connect
+          required: true
+        - label: I have searched existing issues to avoid creating a duplicate
+          required: true
+
+  - type: dropdown
+    id: source-platform
+    attributes:
+      label: Source Platform
+      description: Which platform/device generated the original FIT file?
+      options:
+        - TrainingPeaks Virtual (TPV)
+        - Zwift
+        - MyWhoosh
+        - Wahoo
+        - COROS
+        - Hammerhead Karoo
+        - Other (please specify below)
+    validations:
+      required: true
+
+  - type: input
+    id: source-platform-other
+    attributes:
+      label: Other Platform (if applicable)
+      description: If you selected "Other" above, please specify the platform/device
+      placeholder: e.g., Rouvy, TrainerRoad, Tacx, etc.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem Description
+      description: What happens when you try to upload the processed FIT file to Garmin Connect?
+      placeholder: |
+        Example:
+        - The file uploads but shows no data
+        - Garmin Connect rejects the file with error message "..."
+        - The activity appears but Training Effect is not calculated
+        - The activity shows incorrect device information
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-used
+    attributes:
+      label: Command Used
+      description: What command did you use to process the FIT file?
+      placeholder: |
+        Example:
+        fit-file-faker path/to/file.fit
+        fit-file-faker -u path/to/file.fit
+        fit-file-faker -ua
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Error Output (if any)
+      description: If fit-file-faker produced any errors or warnings, paste them here
+      placeholder: Copy and paste any error messages or warnings from the terminal
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: fit-file-faker Version
+      description: What version of fit-file-faker are you using?
+      placeholder: Run `fit-file-faker --version` to find out
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you running?
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information that might be helpful
+      placeholder: |
+        - Does this happen with all FIT files from this source or just specific ones?
+        - Have you successfully uploaded files from this source before?
+        - Any other relevant details

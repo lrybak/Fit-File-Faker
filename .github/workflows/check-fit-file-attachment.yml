@@ -1,0 +1,85 @@
+name: Check FIT File Attachment
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  check-attachment:
+    runs-on: ubuntu-latest
+    # Only run on issues with the "fit-file" label (auto-applied by template)
+    if: contains(github.event.issue.labels.*.name, 'fit-file')
+
+    permissions:
+      issues: write
+
+    steps:
+      - name: Check for file attachment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const issueBody = issue.body || '';
+
+            // GitHub file attachments appear as URLs in the format:
+            // https://github.com/user/repo/files/... or
+            // https://user-images.githubusercontent.com/...
+            const hasGitHubAttachment = /https:\/\/(?:github\.com\/[^\/]+\/[^\/]+\/files\/|user-images\.githubusercontent\.com\/)/.test(issueBody);
+
+            // Check for .zip files (since GitHub doesn't allow .fit uploads)
+            // Drag-and-drop creates markdown like [filename.zip](url)
+            const hasZipFile = /\[.*\.zip\]/i.test(issueBody);
+
+            // Also check for .fit extension (in case someone references it)
+            const hasFitReference = /\[.*\.fit\]/i.test(issueBody);
+
+            if (!hasGitHubAttachment && !hasZipFile && !hasFitReference) {
+              console.log('No FIT file attachment found. Closing issue.');
+
+              // Post a comment explaining why the issue is being closed
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: [
+                  '## Issue Closed: No FIT File Attached',
+                  '',
+                  'This issue has been automatically closed because no FIT file was attached.',
+                  '',
+                  'As stated in the issue template, **a FIT file upload is required** for investigation. Without the actual file, the problem cannot be diagnosed.',
+                  '',
+                  '### To reopen this issue:',
+                  '',
+                  '1. **Zip your FIT file** (GitHub does not allow `.fit` files to be uploaded directly)',
+                  '2. Upload the `.zip` file by dragging and dropping it into a comment below',
+                  `3. Mention @${context.repo.owner} to request the issue be reopened`,
+                  '',
+                  '### How to attach a file:',
+                  '',
+                  '- First, compress your `.fit` file into a `.zip` archive',
+                  '- Then drag and drop the `.zip` file directly into the comment box, OR',
+                  '- Click the "Attach files by dragging & dropping, selecting or pasting them" link at the bottom of the comment box',
+                  '',
+                  'Thank you for your understanding!'
+                ].join('\n')
+              });
+
+              // Close the issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'not_planned'
+              });
+
+              // Add a label to indicate why it was closed
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: ['auto-closed', 'missing-file']
+              });
+            } else {
+              console.log('FIT file attachment detected. Issue remains open.');
+            }
