@@ -76,33 +76,524 @@ class PathEncoder(json.JSONEncoder):
         return super().default(obj)  # pragma: no cover
 
 
-def get_supported_garmin_devices() -> list[tuple[str, int]]:
-    """Get list of Garmin devices filtered to cycling/training devices.
+@dataclass(frozen=True)
+class GarminDeviceInfo:
+    """Metadata for a Garmin device (supplemental to fit_tool's enum).
 
-    Returns devices with "EDGE", "TACX", or "TRAINING" in their names.
-    Returns list of (name, value) tuples sorted by name.
+    Provides enhanced device information for modern Garmin devices not fully
+    represented in fit_tool's GarminProduct enum, or to add curation metadata
+    for devices that already exist.
+
+    Attributes:
+        name: Human-readable device name (e.g., "Edge 1050")
+        product_id: FIT file product ID (integer)
+        category: Device category ("bike_computer", "multisport_watch", "trainer")
+        year_released: Release year for sorting (integer)
+        is_common: Show in first-level menu (boolean)
+        description: Brief description for UI display
+        software_version: Latest stable firmware version in FIT format (int, e.g., 2922 = v29.22)
+        software_date: Latest firmware release date (YYYY-MM-DD format)
+    """
+
+    name: str
+    product_id: int
+    category: str
+    year_released: int
+    is_common: bool
+    description: str
+    software_version: int | None = None
+    software_date: str | None = None
+
+
+# Supplemental device registry with modern Garmin devices
+# Device IDs sourced from FIT SDK 21.188.00 (docs/reference/FitSDK_21.188.00_device_ids.tsv)
+SUPPLEMENTAL_GARMIN_DEVICES = [
+    # Common bike computers (is_common=True)
+    GarminDeviceInfo(
+        "Edge 1050",
+        4440,
+        "bike_computer",
+        2024,
+        True,
+        "Latest flagship bike computer - 2024",
+        2922,
+        "2025-11-04",
+    ),
+    GarminDeviceInfo(
+        "Edge 1040",
+        3843,
+        "bike_computer",
+        2022,
+        True,
+        "Multi-band GNSS bike computer - 2022",
+        2922,
+        "2025-11-04",
+    ),
+    GarminDeviceInfo(
+        "Edge 840",
+        4062,
+        "bike_computer",
+        2023,
+        True,
+        "Mid-range touchscreen - 2023",
+        2922,
+        "2025-11-04",
+    ),
+    GarminDeviceInfo(
+        "Edge 830",
+        3122,
+        "bike_computer",
+        2019,
+        True,
+        "Current default - 2019",
+        975,
+        "2023-03-22",
+    ),
+    GarminDeviceInfo(
+        "Edge 540",
+        4061,
+        "bike_computer",
+        2023,
+        True,
+        "Mid-range button-based - 2023",
+        2922,
+        "2025-11-04",
+    ),
+    GarminDeviceInfo(
+        "Edge 530",
+        3121,
+        "bike_computer",
+        2019,
+        True,
+        "Popular non-touchscreen - 2019",
+        975,
+        "2023-03-22",
+    ),
+    # Common multisport watches (is_common=True)
+    GarminDeviceInfo(
+        "Fenix 8 47mm",
+        4536,
+        "multisport_watch",
+        2024,
+        True,
+        "Latest multisport watch - 2024",
+        2029,
+        "2026-01-14",
+    ),
+    GarminDeviceInfo(
+        "Fenix 7",
+        3906,
+        "multisport_watch",
+        2022,
+        True,
+        "Popular multisport watch - 2022",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Epix Gen 2",
+        3943,
+        "multisport_watch",
+        2022,
+        True,
+        "AMOLED multisport watch - 2022",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 965",
+        4315,
+        "multisport_watch",
+        2023,
+        True,
+        "Premium running/cycling - 2023",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 955",
+        4024,
+        "multisport_watch",
+        2022,
+        True,
+        "Running watch with maps - 2022",
+        2709,
+        "2026-01-15",
+    ),
+    # Additional bike computers (is_common=False)
+    GarminDeviceInfo(
+        "Edge 1030 Plus",
+        3570,
+        "bike_computer",
+        2020,
+        False,
+        "Previous flagship - 2020",
+        675,
+        "2023-03-22",
+    ),
+    GarminDeviceInfo(
+        "Edge 1030",
+        2713,
+        "bike_computer",
+        2017,
+        False,
+        "Previous flagship - 2017",
+        1375,
+        "2023-03-22",
+    ),
+    GarminDeviceInfo(
+        "Edge 820",
+        2530,
+        "bike_computer",
+        2016,
+        False,
+        "Mid-range with touchscreen - 2016",
+        1270,
+        "2020-09-11",
+    ),
+    GarminDeviceInfo(
+        "Edge 520 Plus",
+        3112,
+        "bike_computer",
+        2018,
+        False,
+        "Mid-range with navigation - 2018",
+        570,
+        "2020-09-11",
+    ),
+    GarminDeviceInfo(
+        "Edge 520", 2067, "bike_computer", 2015, False, "Popular mid-range - 2015"
+    ),
+    GarminDeviceInfo(
+        "Edge 130 Plus",
+        3558,
+        "bike_computer",
+        2020,
+        False,
+        "Compact bike computer - 2020",
+        300,
+        "2023-01-19",
+    ),
+    GarminDeviceInfo(
+        "Edge 130", 2909, "bike_computer", 2018, False, "Compact bike computer - 2018"
+    ),
+    GarminDeviceInfo(
+        "Edge 550",
+        4633,
+        "bike_computer",
+        2024,
+        False,
+        "Mid-range bike computer - 2024",
+        2922,
+        "2025-11-04",
+    ),
+    GarminDeviceInfo(
+        "Edge 850",
+        4634,
+        "bike_computer",
+        2024,
+        False,
+        "Touchscreen bike computer - 2024",
+        2922,
+        "2025-11-04",
+    ),
+    # Additional multisport watches (is_common=False)
+    GarminDeviceInfo(
+        "Fenix 8 Solar 51mm",
+        4532,
+        "multisport_watch",
+        2024,
+        False,
+        "Solar multisport watch - 2024",
+        2029,
+        "2026-01-14",
+    ),
+    GarminDeviceInfo(
+        "Fenix 8 Solar 47mm",
+        4533,
+        "multisport_watch",
+        2024,
+        False,
+        "Solar multisport watch - 2024",
+        2029,
+        "2026-01-14",
+    ),
+    GarminDeviceInfo(
+        "Fenix 8 43mm",
+        4534,
+        "multisport_watch",
+        2024,
+        False,
+        "Compact multisport watch - 2024",
+        2029,
+        "2026-01-14",
+    ),
+    GarminDeviceInfo(
+        "Fenix 8 Pro",
+        4631,
+        "multisport_watch",
+        2024,
+        False,
+        "Pro multisport watch - 2024",
+        2029,
+        "2026-01-14",
+    ),
+    GarminDeviceInfo(
+        "Fenix 7S",
+        3905,
+        "multisport_watch",
+        2022,
+        False,
+        "Compact multisport watch - 2022",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Fenix 7X",
+        3907,
+        "multisport_watch",
+        2022,
+        False,
+        "Large multisport watch - 2022",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Fenix 7S Pro Solar",
+        4374,
+        "multisport_watch",
+        2023,
+        False,
+        "Compact pro solar - 2023",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Fenix 7 Pro Solar",
+        4375,
+        "multisport_watch",
+        2023,
+        False,
+        "Pro solar multisport - 2023",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Fenix 7X Pro Solar",
+        4376,
+        "multisport_watch",
+        2023,
+        False,
+        "Large pro solar - 2023",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Epix Pro 42mm",
+        4312,
+        "multisport_watch",
+        2023,
+        False,
+        "Compact AMOLED - 2023",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Epix Pro 47mm",
+        4313,
+        "multisport_watch",
+        2023,
+        False,
+        "Mid AMOLED - 2023",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Epix Pro 51mm",
+        4314,
+        "multisport_watch",
+        2023,
+        False,
+        "Large AMOLED - 2023",
+        2511,
+        "2026-01-21",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 265 Large",
+        4257,
+        "multisport_watch",
+        2023,
+        False,
+        "AMOLED running watch - 2023",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 265 Small",
+        4258,
+        "multisport_watch",
+        2023,
+        False,
+        "Compact AMOLED running - 2023",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 255",
+        3992,
+        "multisport_watch",
+        2022,
+        False,
+        "Mid-range running watch - 2022",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 255 Music",
+        3990,
+        "multisport_watch",
+        2022,
+        False,
+        "Running watch with music - 2022",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 255S",
+        3993,
+        "multisport_watch",
+        2022,
+        False,
+        "Compact running watch - 2022",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 255S Music",
+        3991,
+        "multisport_watch",
+        2022,
+        False,
+        "Compact with music - 2022",
+        2709,
+        "2026-01-15",
+    ),
+    GarminDeviceInfo(
+        "Forerunner 945",
+        3113,
+        "multisport_watch",
+        2019,
+        False,
+        "Premium running watch - 2019",
+        1370,
+        "2024-12-02",
+    ),
+    # Tacx trainers (is_common=False)
+    GarminDeviceInfo(
+        "Tacx Training App (Win)",
+        20533,
+        "trainer",
+        2020,
+        False,
+        "Tacx desktop app - Windows",
+    ),
+    GarminDeviceInfo(
+        "Tacx Training App (Mac)",
+        20534,
+        "trainer",
+        2020,
+        False,
+        "Tacx desktop app - macOS",
+    ),
+    GarminDeviceInfo(
+        "Tacx Training App (Android)",
+        30045,
+        "trainer",
+        2020,
+        False,
+        "Tacx mobile app - Android",
+    ),
+    GarminDeviceInfo(
+        "Tacx Training App (iOS)",
+        30046,
+        "trainer",
+        2020,
+        False,
+        "Tacx mobile app - iOS",
+    ),
+]
+
+
+def get_supported_garmin_devices(show_all: bool = False) -> list[tuple[str, int, str]]:
+    """Get list of Garmin devices for picker UI.
+
+    Combines devices from fit_tool's GarminProduct enum (filtered to cycling/training
+    devices with "EDGE", "TACX", or "TRAINING" in their names) with the supplemental
+    device registry containing modern devices with metadata.
+
+    Args:
+        show_all: If False, return only common devices (is_common=True). If True,
+            return all devices. Defaults to False.
 
     Returns:
-        List of tuples containing (device_name, device_id) for supported devices.
+        List of tuples containing (display_name, product_id, description).
+        Sorted by: is_common (desc), year_released (desc), name (asc).
 
     Examples:
-        >>> devices = get_supported_garmin_devices()
+        >>> # Get common devices only
+        >>> devices = get_supported_garmin_devices(show_all=False)
         >>> print(devices[0])
-        ('EDGE_1030', 2713)
+        ('Edge 1050', 4440, 'Latest flagship bike computer - 2024')
+        >>>
+        >>> # Get all devices
+        >>> all_devices = get_supported_garmin_devices(show_all=True)
+        >>> len(all_devices) > len(devices)
+        True
     """
     from fit_tool.profile.profile_type import GarminProduct
 
-    products = []
+    # Step 1: Get devices from fit_tool enum (filtered to cycling/training)
+    fit_tool_devices = {}
     for attr_name in dir(GarminProduct):
         if not attr_name.startswith("_") and attr_name.isupper():
             if any(kw in attr_name for kw in ["EDGE", "TACX", "TRAINING"]):
                 try:
                     value = getattr(GarminProduct, attr_name).value
-                    products.append((attr_name, value))
+                    # Convert enum name to readable format (e.g., EDGE_1030 -> Edge 1030)
+                    display_name = attr_name.replace("_", " ").title()
+                    fit_tool_devices[value] = (display_name, value, "")
                 except AttributeError:  # pragma: no cover
                     continue
 
-    return sorted(products, key=lambda x: x[0])
+    # Step 2: Get devices from supplemental registry
+    supplemental_devices = {}
+    for device in SUPPLEMENTAL_GARMIN_DEVICES:
+        if not show_all and not device.is_common:
+            continue
+        supplemental_devices[device.product_id] = (
+            device.name,
+            device.product_id,
+            device.description,
+        )
+
+    # Step 3: Merge (supplemental overrides fit_tool for duplicate IDs)
+    merged_devices = {**fit_tool_devices, **supplemental_devices}
+
+    # Step 4: Sort by is_common (desc), year (desc), name (asc)
+    # Create lookup for sorting metadata
+    device_meta = {d.product_id: d for d in SUPPLEMENTAL_GARMIN_DEVICES}
+
+    def sort_key(item):
+        name, product_id, description = item
+        meta = device_meta.get(product_id)
+        if meta:
+            # Supplemental device - use metadata
+            return (not meta.is_common, -meta.year_released, meta.name)
+        else:
+            # fit_tool device - sort after common devices
+            return (True, 0, name)
+
+    return sorted(merged_devices.values(), key=sort_key)
 
 
 class AppType(Enum):
@@ -141,6 +632,9 @@ class Profile:
         fitfiles_path: Path to directory containing FIT files to process
         manufacturer: Manufacturer ID to use for device simulation (defaults to Garmin)
         device: Device/product ID to use for device simulation (defaults to Edge 830)
+        serial_number: Device serial number (auto-generated if not specified)
+        software_version: Firmware version in FIT format (e.g., 2922 = v29.22). If None,
+            no FileCreatorMessage will be added to FIT files.
 
     Examples:
         >>> from pathlib import Path
@@ -160,6 +654,8 @@ class Profile:
     fitfiles_path: Path
     manufacturer: int | None = None
     device: int | None = None
+    serial_number: int | None = None
+    software_version: int | None = None
 
     def __post_init__(self):
         """Convert string types to proper objects after initialization.
@@ -180,6 +676,12 @@ class Profile:
             self.manufacturer = Manufacturer.GARMIN.value
         if self.device is None:
             self.device = GarminProduct.EDGE_830.value
+
+        # Generate serial number if not specified
+        if self.serial_number is None:
+            import random
+
+            self.serial_number = random.randint(1_000_000_000, 4_294_967_295)
 
     def get_manufacturer_name(self) -> str:
         """Get human-readable manufacturer name.
@@ -202,18 +704,46 @@ class Profile:
         """Get human-readable device name.
 
         Returns:
-            Device name if found in GarminProduct enum, otherwise "UNKNOWN (id)".
+            Device name if found in GarminProduct enum or supplemental registry,
+            otherwise "UNKNOWN (id)".
 
         Examples:
             >>> profile.get_device_name()
             'EDGE_830'
+            >>> # For supplemental device
+            >>> profile.device = 4440
+            >>> profile.get_device_name()
+            'Edge 1050'
         """
         from fit_tool.profile.profile_type import GarminProduct
 
+        # Try fit_tool enum first
         try:
             return GarminProduct(self.device).name
         except ValueError:
+            # Fallback to supplemental registry
+            for device_info in SUPPLEMENTAL_GARMIN_DEVICES:
+                if device_info.product_id == self.device:
+                    return device_info.name
+            # Unknown device
             return f"UNKNOWN ({self.device})"
+
+    def validate_serial_number(self) -> bool:
+        """Validate that serial_number is valid for FIT spec (uint32z).
+
+        Returns:
+            True if serial_number is valid (1,000,000,000 to 4,294,967,295), False otherwise.
+
+        Examples:
+            >>> profile.serial_number = 1234567890
+            >>> profile.validate_serial_number()
+            True
+        """
+        if self.serial_number is None:
+            return False
+        if not isinstance(self.serial_number, int):
+            return False
+        return 1_000_000_000 <= self.serial_number <= 4_294_967_295
 
 
 @dataclass
@@ -421,6 +951,26 @@ class ConfigManager:
                 # Save migrated config back to file if migration occurred
                 if was_legacy:
                     _logger.debug("Saving migrated config to file")
+                    with self.config_file.open("w") as fw:
+                        json.dump(asdict(config), fw, indent=2, cls=PathEncoder)
+
+                # Migrate profiles without serial numbers
+                migrated = False
+                for profile in config.profiles:
+                    if profile.serial_number is None:
+                        import random
+
+                        profile.serial_number = random.randint(
+                            1_000_000_000, 4_294_967_295
+                        )
+                        migrated = True
+                        _logger.info(
+                            f'Generated serial number for profile "{profile.name}": {profile.serial_number}'
+                        )
+
+                # Save migrated config if serial numbers were added
+                if migrated:
+                    _logger.debug("Saving config with new serial numbers to file")
                     with self.config_file.open("w") as fw:
                         json.dump(asdict(config), fw, indent=2, cls=PathEncoder)
 
@@ -765,6 +1315,8 @@ class ProfileManager:
         fitfiles_path: Path,
         manufacturer: int | None = None,
         device: int | None = None,
+        serial_number: int | None = None,
+        software_version: int | None = None,
     ) -> Profile:
         """Create a new profile and add it to config.
 
@@ -776,6 +1328,9 @@ class ProfileManager:
             fitfiles_path: Path to FIT files directory.
             manufacturer: Manufacturer ID for device simulation (defaults to Garmin).
             device: Device/product ID for device simulation (defaults to Edge 830).
+            serial_number: Device serial number (defaults to auto-generated 10-digit number).
+            software_version: Firmware version in FIT format (e.g., 2922 = v29.22). If None,
+                no FileCreatorMessage will be added to FIT files.
 
         Returns:
             The newly created Profile object.
@@ -797,6 +1352,14 @@ class ProfileManager:
         if self.config_manager.config.get_profile(name):
             raise ValueError(f'Profile "{name}" already exists')
 
+        # Auto-lookup software_version from device if not provided
+        if software_version is None and device is not None:
+            device_info = next(
+                (d for d in SUPPLEMENTAL_GARMIN_DEVICES if d.product_id == device), None
+            )
+            if device_info and device_info.software_version:
+                software_version = device_info.software_version
+
         # Create new profile
         profile = Profile(
             name=name,
@@ -806,7 +1369,18 @@ class ProfileManager:
             fitfiles_path=fitfiles_path,
             manufacturer=manufacturer,
             device=device,
+            serial_number=serial_number,
+            software_version=software_version,
         )
+
+        # Validate serial number if provided
+        if serial_number is not None and not profile.validate_serial_number():
+            import random
+
+            _logger.warning(
+                f"Invalid serial number {serial_number}, generating a new one"
+            )
+            profile.serial_number = random.randint(1_000_000_000, 4_294_967_295)
 
         # Add to config and save
         self.config_manager.config.profiles.append(profile)
@@ -844,6 +1418,8 @@ class ProfileManager:
         new_name: str | None = None,
         manufacturer: int | None = None,
         device: int | None = None,
+        serial_number: int | None = None,
+        software_version: int | None = None,
     ) -> Profile:
         """Update an existing profile.
 
@@ -856,6 +1432,8 @@ class ProfileManager:
             new_name: New profile name (optional).
             manufacturer: New manufacturer ID (optional).
             device: New device ID (optional).
+            serial_number: New serial number (optional).
+            software_version: New firmware version in FIT format (optional).
 
         Returns:
             The updated Profile object.
@@ -886,6 +1464,31 @@ class ProfileManager:
             profile.manufacturer = manufacturer
         if device is not None:
             profile.device = device
+            # Auto-lookup software_version from device if not explicitly provided
+            if software_version is None:
+                device_info = next(
+                    (d for d in SUPPLEMENTAL_GARMIN_DEVICES if d.product_id == device),
+                    None,
+                )
+                if device_info and device_info.software_version:
+                    software_version = device_info.software_version
+        if serial_number is not None:
+            # Validate serial number
+            temp_profile = Profile(
+                name="temp",
+                app_type=profile.app_type,
+                garmin_username="",
+                garmin_password="",
+                fitfiles_path=Path(),
+                serial_number=serial_number,
+            )
+            if not temp_profile.validate_serial_number():
+                raise ValueError(
+                    f"Invalid serial number {serial_number}. Must be a 10-digit integer."
+                )
+            profile.serial_number = serial_number
+        if software_version is not None:
+            profile.software_version = software_version
 
         # Update default_profile if name changed
         if new_name and self.config_manager.config.default_profile == name:
@@ -958,6 +1561,7 @@ class ProfileManager:
         table.add_column("Name", style="green", no_wrap=True)
         table.add_column("App", style="blue")
         table.add_column("Device", style="cyan")
+        table.add_column("Serial #", style="bright_blue")
         table.add_column("Garmin User", style="yellow")
         table.add_column("FIT Path", style="magenta")
 
@@ -981,6 +1585,11 @@ class ProfileManager:
             # Get device name
             device_display = profile.get_device_name()
 
+            # Format serial number
+            serial_display = (
+                str(profile.serial_number) if profile.serial_number else "N/A"
+            )
+
             # Truncate long paths
             path_str = str(profile.fitfiles_path)
             if len(path_str) > 40:
@@ -990,6 +1599,7 @@ class ProfileManager:
                 name_display,
                 app_display,
                 device_display,
+                serial_display,
                 profile.garmin_username,
                 path_str,
             )
@@ -1115,63 +1725,238 @@ class ProfileManager:
         # Step 4: Device customization (optional)
         manufacturer = None
         device = None
+        serial_number = None
+        software_version = None
         customize_device = questionary.confirm(
             "Customize device simulation? (default: Garmin Edge 830)", default=False
         ).ask()
 
         if customize_device:
-            # Get list of supported devices
-            supported_devices = get_supported_garmin_devices()
-            device_choices = [
-                questionary.Choice(f"{name} ({device_id})", (name, device_id))
-                for name, device_id in supported_devices
-            ]
-            device_choices.append(
-                questionary.Choice("Custom (enter numeric ID)", ("CUSTOM", None))
-            )
+            # Two-level menu: common devices first, then "View all devices" option
+            show_all = False
+            device_selected = False
+            selected_device_name = None
 
-            selected = questionary.select(
-                "Select Garmin device to simulate:", choices=device_choices
-            ).ask()
+            while not device_selected:
+                # Get list of supported devices (common or all based on show_all flag)
+                supported_devices = get_supported_garmin_devices(show_all=show_all)
 
-            if not selected:
-                return None
+                # Build device choices for the menu
+                device_choices = []
 
-            # Extract value from Choice object if necessary (for testing)
-            if hasattr(selected, "value"):
-                selected = selected.value
+                if not show_all:
+                    # Level 1: Common devices grouped by category
+                    # Bike computers
+                    bike_computers = [
+                        (name, device_id, desc)
+                        for name, device_id, desc in supported_devices
+                        if any(
+                            d.product_id == device_id and d.category == "bike_computer"
+                            for d in SUPPLEMENTAL_GARMIN_DEVICES
+                        )
+                    ]
+                    for name, device_id, desc in bike_computers:
+                        device_choices.append(
+                            questionary.Choice(
+                                f"{name} ({device_id})", (name, device_id)
+                            )
+                        )
 
-            device_name, device_id = selected
+                    # Add separator
+                    device_choices.append(
+                        questionary.Separator("───────────────────────────")
+                    )
 
-            if device_name == "CUSTOM":
-                # Allow custom numeric ID
-                device_input = questionary.text(
-                    "Enter numeric device ID:",
-                    validate=lambda x: x.isdigit() and int(x) > 0,
+                    # Multisport watches
+                    watches = [
+                        (name, device_id, desc)
+                        for name, device_id, desc in supported_devices
+                        if any(
+                            d.product_id == device_id
+                            and d.category == "multisport_watch"
+                            for d in SUPPLEMENTAL_GARMIN_DEVICES
+                        )
+                    ]
+                    for name, device_id, desc in watches:
+                        device_choices.append(
+                            questionary.Choice(
+                                f"{name} ({device_id})", (name, device_id)
+                            )
+                        )
+
+                    # Add separator and special options
+                    device_choices.append(
+                        questionary.Separator("───────────────────────────")
+                    )
+                    device_choices.append(
+                        questionary.Choice(
+                            "View all devices (70+ options)...", ("VIEW_ALL", None)
+                        )
+                    )
+                    device_choices.append(
+                        questionary.Choice(
+                            "Custom (enter numeric ID)", ("CUSTOM", None)
+                        )
+                    )
+                else:
+                    # Level 2: All devices
+                    # Group by category
+                    categories = {}
+                    for name, device_id, desc in supported_devices:
+                        # Determine category
+                        category = "Other"
+                        for d in SUPPLEMENTAL_GARMIN_DEVICES:
+                            if d.product_id == device_id:
+                                category = d.category.replace("_", " ").title()
+                                break
+
+                        if category not in categories:
+                            categories[category] = []
+
+                        display = f"{name} ({device_id})"
+                        categories[category].append((display, (name, device_id)))
+
+                    # Add devices by category
+                    for category in sorted(categories.keys()):
+                        device_choices.append(
+                            questionary.Separator(f"─── {category} ───")
+                        )
+                        for display, value in categories[category]:
+                            device_choices.append(questionary.Choice(display, value))
+
+                    # Add separator and special options
+                    device_choices.append(
+                        questionary.Separator("───────────────────────────")
+                    )
+                    device_choices.append(
+                        questionary.Choice("Back to common devices", ("BACK", None))
+                    )
+                    device_choices.append(
+                        questionary.Choice(
+                            "Custom (enter numeric ID)", ("CUSTOM", None)
+                        )
+                    )
+
+                # Show the menu
+                selected = questionary.select(
+                    "Select Garmin device to simulate:", choices=device_choices
                 ).ask()
 
-                if not device_input:
+                if not selected:
                     return None
 
-                device = int(device_input)
+                # Extract value from Choice object if necessary (for testing)
+                if hasattr(selected, "value"):
+                    selected = selected.value
 
-                # Warn if device ID not in enum
-                from fit_tool.profile.profile_type import GarminProduct
+                device_name, device_id = selected
 
-                try:
-                    GarminProduct(device)
-                except ValueError:
-                    console.print(
-                        f"\n[yellow]⚠ Warning: Device ID {device} is not recognized in the "
-                        f"GarminProduct enum. The profile will still be created.[/yellow]"
-                    )
-            else:
-                device = device_id
+                if device_name == "VIEW_ALL":
+                    # Switch to showing all devices
+                    show_all = True
+                    continue
+                elif device_name == "BACK":
+                    # Switch back to common devices
+                    show_all = False
+                    continue
+                elif device_name == "CUSTOM":
+                    # Allow custom numeric ID
+                    device_input = questionary.text(
+                        "Enter numeric device ID:",
+                        validate=lambda x: x.isdigit() and int(x) > 0,
+                    ).ask()
+
+                    if not device_input:
+                        return None
+
+                    device = int(device_input)
+                    device_selected = True
+
+                    # Warn if device ID not in enum or supplemental registry
+                    from fit_tool.profile.profile_type import GarminProduct
+
+                    try:
+                        GarminProduct(device)
+                    except ValueError:
+                        # Check supplemental registry
+                        found = any(
+                            d.product_id == device for d in SUPPLEMENTAL_GARMIN_DEVICES
+                        )
+                        if not found:
+                            console.print(
+                                f"\n[yellow]⚠ Warning: Device ID {device} is not recognized in the "
+                                f"GarminProduct enum or supplemental registry. The profile will still be created.[/yellow]"
+                            )
+                else:
+                    # Device selected
+                    device = device_id
+                    selected_device_name = device_name
+                    device_selected = True
+
+            # Look up software_version from supplemental registry
+            if device is not None:
+                device_info = next(
+                    (d for d in SUPPLEMENTAL_GARMIN_DEVICES if d.product_id == device),
+                    None,
+                )
+                if device_info and device_info.software_version:
+                    software_version = device_info.software_version
 
             # Always use Garmin manufacturer for now
             from fit_tool.profile.profile_type import Manufacturer
 
             manufacturer = Manufacturer.GARMIN.value
+
+            # Ask about serial number customization
+            customize_serial = questionary.confirm(
+                "Customize serial number for this device?", default=False
+            ).ask()
+
+            if customize_serial:
+                # Show instructions for finding device serial number
+                console.print(
+                    "\n[dim]To find your device's serial number (Unit ID):[/dim]"
+                )
+                console.print(
+                    "[dim]  Garmin Edge: System → About → Copyright Info → Unit ID[/dim]\n"
+                )
+
+                serial_input = questionary.text(
+                    "Enter 10-digit serial number:",
+                    validate=lambda x: (
+                        x.isdigit()
+                        and len(x) == 10
+                        and 1_000_000_000 <= int(x) <= 4_294_967_295
+                    )
+                    or "Must be a 10-digit number between 1000000000 and 4294967295",
+                ).ask()
+
+                if serial_input and serial_input.isdigit():
+                    serial_number = int(serial_input)
+
+            if serial_number is None:
+                # User declined customization, generate random
+                import random
+
+                serial_number = random.randint(1_000_000_000, 4_294_967_295)
+        else:
+            # User declined device customization, still generate serial for default device
+            import random
+
+            serial_number = random.randint(1_000_000_000, 4_294_967_295)
+
+        # Display final device configuration before profile creation
+        if device is None:
+            device_display = '"Edge 830" (3122)'
+        elif selected_device_name:
+            device_display = f'"{selected_device_name}" ({device})'
+        else:
+            device_display = f"Device {device}"
+        console.print(f"\n[cyan]Device:[/cyan] [yellow]{device_display}[/yellow]")
+        console.print(f"[cyan]Serial Number:[/cyan] [yellow]{serial_number}[/yellow]")
+        console.print(
+            "[dim](You can change these later via the edit profile menu)[/dim]"
+        )
 
         # Step 5: Profile name
         suggested_name = app_type.value.split("_")[0].lower()
@@ -1191,6 +1976,8 @@ class ProfileManager:
                 fitfiles_path=fitfiles_path,
                 manufacturer=manufacturer,
                 device=device,
+                serial_number=serial_number,
+                software_version=software_version,
             )
             console.print(
                 f"\n[green]✓ Profile '{profile_name}' created successfully![/green]"
@@ -1241,34 +2028,144 @@ class ProfileManager:
         # Ask about device simulation
         new_manufacturer = None
         new_device = None
+        new_serial = None
+        new_software_version = None
         current_device = profile.get_device_name()
+        current_serial = profile.serial_number if profile.serial_number else "N/A"
         edit_device = questionary.confirm(
-            f"Edit device simulation? (current: {current_device})", default=False
+            f"Edit device simulation? (current: {current_device}, serial: {current_serial})",
+            default=False,
         ).ask()
 
         if edit_device:
-            # Get list of supported devices
-            supported_devices = get_supported_garmin_devices()
-            device_choices = [
-                questionary.Choice(f"{name} ({device_id})", (name, device_id))
-                for name, device_id in supported_devices
-            ]
-            device_choices.append(
-                questionary.Choice("Custom (enter numeric ID)", ("CUSTOM", None))
-            )
+            # Two-level menu: common devices first, then "View all devices" option
+            show_all = False
+            device_selected = False
 
-            selected = questionary.select(
-                "Select Garmin device to simulate:", choices=device_choices
-            ).ask()
+            while not device_selected:
+                # Get list of supported devices (common or all based on show_all flag)
+                supported_devices = get_supported_garmin_devices(show_all=show_all)
 
-            if selected:
+                # Build device choices for the menu
+                device_choices = []
+
+                if not show_all:
+                    # Level 1: Common devices grouped by category
+                    # Bike computers
+                    bike_computers = [
+                        (name, device_id, desc)
+                        for name, device_id, desc in supported_devices
+                        if any(
+                            d.product_id == device_id and d.category == "bike_computer"
+                            for d in SUPPLEMENTAL_GARMIN_DEVICES
+                        )
+                    ]
+                    for name, device_id, desc in bike_computers:
+                        device_choices.append(
+                            questionary.Choice(
+                                f"{name} ({device_id})", (name, device_id)
+                            )
+                        )
+
+                    # Add separator
+                    device_choices.append(
+                        questionary.Separator("───────────────────────────")
+                    )
+
+                    # Multisport watches
+                    watches = [
+                        (name, device_id, desc)
+                        for name, device_id, desc in supported_devices
+                        if any(
+                            d.product_id == device_id
+                            and d.category == "multisport_watch"
+                            for d in SUPPLEMENTAL_GARMIN_DEVICES
+                        )
+                    ]
+                    for name, device_id, desc in watches:
+                        device_choices.append(
+                            questionary.Choice(
+                                f"{name} ({device_id})", (name, device_id)
+                            )
+                        )
+
+                    # Add separator and special options
+                    device_choices.append(
+                        questionary.Separator("───────────────────────────")
+                    )
+                    device_choices.append(
+                        questionary.Choice(
+                            "View all devices (70+ options)...", ("VIEW_ALL", None)
+                        )
+                    )
+                    device_choices.append(
+                        questionary.Choice(
+                            "Custom (enter numeric ID)", ("CUSTOM", None)
+                        )
+                    )
+                else:
+                    # Level 2: All devices
+                    # Group by category
+                    categories = {}
+                    for name, device_id, desc in supported_devices:
+                        # Determine category
+                        category = "Other"
+                        for d in SUPPLEMENTAL_GARMIN_DEVICES:
+                            if d.product_id == device_id:
+                                category = d.category.replace("_", " ").title()
+                                break
+
+                        if category not in categories:
+                            categories[category] = []
+
+                        display = f"{name} ({device_id})"
+                        categories[category].append((display, (name, device_id)))
+
+                    # Add devices by category
+                    for category in sorted(categories.keys()):
+                        device_choices.append(
+                            questionary.Separator(f"─── {category} ───")
+                        )
+                        for display, value in categories[category]:
+                            device_choices.append(questionary.Choice(display, value))
+
+                    # Add separator and special options
+                    device_choices.append(
+                        questionary.Separator("───────────────────────────")
+                    )
+                    device_choices.append(
+                        questionary.Choice("Back to common devices", ("BACK", None))
+                    )
+                    device_choices.append(
+                        questionary.Choice(
+                            "Custom (enter numeric ID)", ("CUSTOM", None)
+                        )
+                    )
+
+                # Show the menu
+                selected = questionary.select(
+                    "Select Garmin device to simulate:", choices=device_choices
+                ).ask()
+
+                if not selected:
+                    device_selected = True
+                    continue
+
                 # Extract value from Choice object if necessary (for testing)
                 if hasattr(selected, "value"):
                     selected = selected.value
 
                 device_name, device_id = selected
 
-                if device_name == "CUSTOM":
+                if device_name == "VIEW_ALL":
+                    # Switch to showing all devices
+                    show_all = True
+                    continue
+                elif device_name == "BACK":
+                    # Switch back to common devices
+                    show_all = False
+                    continue
+                elif device_name == "CUSTOM":
                     # Allow custom numeric ID
                     device_input = questionary.text(
                         "Enter numeric device ID:",
@@ -1277,24 +2174,93 @@ class ProfileManager:
 
                     if device_input:
                         new_device = int(device_input)
+                        device_selected = True
 
-                        # Warn if device ID not in enum
+                        # Warn if device ID not in enum or supplemental registry
                         from fit_tool.profile.profile_type import GarminProduct
 
                         try:
                             GarminProduct(new_device)
                         except ValueError:
-                            console.print(
-                                f"\n[yellow]⚠ Warning: Device ID {new_device} is not recognized in the "
-                                f"GarminProduct enum. The profile will still be updated.[/yellow]"
+                            # Check supplemental registry
+                            found = any(
+                                d.product_id == new_device
+                                for d in SUPPLEMENTAL_GARMIN_DEVICES
                             )
+                            if not found:
+                                console.print(
+                                    f"\n[yellow]⚠ Warning: Device ID {new_device} is not recognized in the "
+                                    f"GarminProduct enum or supplemental registry. The profile will still be updated.[/yellow]"
+                                )
                 else:
+                    # Device selected
                     new_device = device_id
+                    device_selected = True
+
+            # Look up software_version from supplemental registry
+            if new_device is not None:
+                device_info = next(
+                    (
+                        d
+                        for d in SUPPLEMENTAL_GARMIN_DEVICES
+                        if d.product_id == new_device
+                    ),
+                    None,
+                )
+                if device_info and device_info.software_version:
+                    new_software_version = device_info.software_version
 
                 # Always use Garmin manufacturer
                 from fit_tool.profile.profile_type import Manufacturer
 
                 new_manufacturer = Manufacturer.GARMIN.value
+
+            # Ask about serial number editing
+            edit_serial = questionary.confirm(
+                f"Edit serial number? (current: {current_serial})", default=False
+            ).ask()
+
+            if edit_serial:
+                # Ask if user wants to enter custom or generate random
+                serial_choice = questionary.select(
+                    "How would you like to set the serial number?",
+                    choices=[
+                        questionary.Choice("Generate random serial number", "random"),
+                        questionary.Choice("Enter custom serial number", "custom"),
+                    ],
+                ).ask()
+
+                if serial_choice == "random":
+                    import random
+
+                    new_serial = random.randint(1_000_000_000, 4_294_967_295)
+                    console.print(
+                        f"\n[green]Generated new serial number: {new_serial}[/green]"
+                    )
+                elif serial_choice == "custom":
+                    # Show instructions for finding device serial number
+                    console.print(
+                        "\n[dim]To find your device's serial number (Unit ID):[/dim]"
+                    )
+                    console.print(
+                        "[dim]  Garmin Edge: System → About → Copyright Info → Unit ID[/dim]\n"
+                    )
+
+                    serial_input = questionary.text(
+                        "Enter new 10-digit serial number:",
+                        default=str(profile.serial_number)
+                        if profile.serial_number
+                        else "",
+                        validate=lambda x: (
+                            x.isdigit()
+                            and len(x) == 10
+                            and 1_000_000_000 <= int(x) <= 4_294_967_295
+                        )
+                        or "Must be a 10-digit number between 1000000000 and 4294967295",
+                    ).ask()
+
+                    if serial_input and serial_input.isdigit():
+                        new_serial = int(serial_input)
 
         # Update profile with provided values
         try:
@@ -1306,6 +2272,8 @@ class ProfileManager:
                 fitfiles_path=Path(new_path) if new_path else None,
                 manufacturer=new_manufacturer,
                 device=new_device,
+                serial_number=new_serial,
+                software_version=new_software_version,
             )
             console.print("\n[green]✓ Profile updated successfully![/green]")
         except ValueError as e:

@@ -12,12 +12,22 @@
 
 </div>
 
-This application allows you to easily modify [FIT](https://developer.garmin.com/fit/overview/) files to make them appear to come from a Garmin device (Edge 830 by default, or any supported Garmin cycling device) and upload them to Garmin Connect using the [`garth`](https://github.com/matin/garth/) library. The FIT editing is done using Stages Cycling's [`fit_tool`](https://bitbucket.org/stagescycling/python_fit_tool/src/main/) library.
+This application allows you to easily modify [FIT](https://developer.garmin.com/fit/overview/) files to make them appear to come from a Garmin device (70+ modern devices supported, including Edge 1050, Fenix 8, Forerunner 965, and more) and upload them to Garmin Connect using the [`garth`](https://github.com/matin/garth/) library. The FIT editing is done using Stages Cycling's [`fit_tool`](https://bitbucket.org/stagescycling/python_fit_tool/src/main/) library.
 
 !!! support "Support This Project"
     If FIT File Faker saves you time or enhances your training workflow, consider [buying me a coffee ☕](https://ko-fi.com/josh851356). Your support helps maintain and improve this project!
 
 Additionally, it can be run in a "monitor" mode that will watch a folder for new FIT files and will automatically edit/upload them as they are produced. One potential application of this mode is to have the tool auto-start on the computer that you use for indoor training, so rides are automatically uploaded to Garmin Connect when you finish.
+
+## Feature walkthrough
+
+<div align="center">
+  <video width="800" autoplay loop muted playsinline controls>
+    <source src="vhs_gifs/features.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+  <p><em>Overview of FIT File Faker features and commands</em></p>
+</div>
 
 ## Overview
 
@@ -121,14 +131,22 @@ As of version 2.0.0, FIT File Faker now supports **multi-profile configuration**
       "app_type": "tp_virtual",
       "garmin_username": "user@work.com",
       "garmin_password": "secret123",
-      "fitfiles_path": "/Users/josh/TPVirtual/abc123/FITFiles"
+      "fitfiles_path": "/Users/josh/TPVirtual/abc123/FITFiles",
+      "manufacturer": 1,
+      "device": 3122,
+      "serial_number": 1234567890,
+      "software_version": 975
     },
     {
       "name": "zwift",
       "app_type": "zwift",
       "garmin_username": "personal@gmail.com",
       "garmin_password": "secret456",
-      "fitfiles_path": "/Users/josh/Documents/Zwift/Activities"
+      "fitfiles_path": "/Users/josh/Documents/Zwift/Activities",
+      "manufacturer": 1,
+      "device": 4061,
+      "serial_number": 2362467083,
+      "software_version": 2922
     }
   ],
   "default_profile": "tpv"
@@ -143,7 +161,10 @@ As of version 2.0.0, FIT File Faker now supports **multi-profile configuration**
     ```
 
     <div align="center">
-      <img src="vhs_gifs/config_new.gif" alt="Creating a new profile" width="800" />
+      <video width="800" autoplay loop muted playsinline controls>
+        <source src="vhs_gifs/config_new.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
       <p><em>Creating a new profile with the interactive menu</em></p>
     </div>
 
@@ -175,16 +196,20 @@ For backward compatibility, the tool still supports the legacy single-profile fo
 
 By default, FIT File Faker modifies files to appear as if they came from a **Garmin Edge 830**. However, each profile can be configured to simulate a different Garmin device.
 
-### Supported Devices
+### Supported Target Devices
 
-The tool supports simulation of any Garmin cycling/training device, including:
+The tool supports simulating activities from 70+ modern Garmin GPS
+devices, including bike computers like the Edge 840, 1050, etc.,
+multisport watches like the ForeRunner and Fenix series, and others.
 
-- **Edge Series**: Edge 130, Edge 520, Edge 530, Edge 830, Edge 1030, Edge 1040, etc.
-- **Tacx Trainers**: Tacx NEO series and other Tacx smart trainers
-- **Training Devices**: Various other Garmin training computers
+!!! info "Two-Level Device Selection"
+    During profile creation or editing, the tool uses a curated two-level menu system:
 
-!!! info "Device Selection"
-    During profile creation or editing, you can optionally customize which Garmin device to simulate. The tool presents a filtered list of ~66 supported Garmin cycling and training devices.
+    **Level 1**: Shows 11 common devices grouped by category (bike computers, watches)
+
+    **Level 2**: Access 70+ devices via "View all devices" option
+
+    This makes the most common devices easily accessible while maintaining access to the full device catalog if you want to simulate a particular device.
 
 ### Customizing Device Simulation
 
@@ -196,11 +221,12 @@ When creating or editing a profile via `--config-menu`, you'll be prompted:
 
 If you select **Yes**, you can:
 
-1. **Choose from a list** of supported Garmin devices (Edge, Tacx, Training series)
-2. **Enter a custom numeric device ID** for newer devices not yet in the list
+1. **Choose from common devices** - Curated list of 11 popular devices
+2. **View all devices** - Access full catalog of 70+ devices organized by category
+3. **Enter a custom numeric device ID** (advanced users) - Allows you to specify a custom "device id" in the resulting FIT file; most users should not want this option, but it is available if you wish
 
 !!! tip "Custom Device IDs"
-    If you enter a numeric device ID that's not recognized, the tool will show a warning but still create/update the profile. This allows using newer Garmin devices that may not be in the library yet.
+    If you enter a numeric device ID that's not in the registry, the tool will show a warning but still create/update the profile. This allows using newer Garmin devices or less common models.
 
 ### Example: Different Devices for Different Profiles
 
@@ -214,7 +240,9 @@ If you select **Yes**, you can:
       "garmin_password": "secret",
       "fitfiles_path": "/path/to/tpv",
       "manufacturer": 1,
-      "device": 3122  // Edge 830 (default)
+      "device": 3122,  // Edge 830 (default)
+      "serial_number": 1234567890,
+      "software_version": 975
     },
     {
       "name": "zwift",
@@ -223,7 +251,9 @@ If you select **Yes**, you can:
       "garmin_password": "secret",
       "fitfiles_path": "/path/to/zwift",
       "manufacturer": 1,
-      "device": 2713  // Edge 1030
+      "device": 2713,  // Edge 1030
+      "serial_number": 2362467083,
+      "software_version": 2922
     }
   ]
 }
@@ -231,19 +261,16 @@ If you select **Yes**, you can:
 
 ### Why Customize Device Simulation?
 
-- **Match your actual device**: If you own an Edge 1030, simulate that device for consistency
+- **Match your actual device**: If you own an Edge 1030, simulate that device (with its serial number) for consistency
 - **Testing**: Try different devices to see how Garmin Connect responds
 - **Feature compatibility**: Some Garmin devices may enable different features in Garmin Connect
 
 !!! note "Backward Compatibility"
-    Existing profiles without device settings automatically default to Edge 830, maintaining the original behavior.
+    Existing profiles without device settings automatically default to Edge 830, maintaining the original behavior prior to v2.1.0.
 
 ## Usage
 
-<div align="center">
-  <img src="vhs_gifs/features.gif" alt="FIT File Faker Features Demo" width="800" />
-  <p><em>Overview of FIT File Faker features and commands</em></p>
-</div>
+
 
 ### Command-line Options
 
@@ -311,7 +338,10 @@ fit-file-faker --show-dirs
 ```
 
 <div align="center">
-  <img src="vhs_gifs/config_edit.gif" alt="Editing a profile" width="800" />
+  <video width="800" autoplay loop muted playsinline controls>
+    <source src="vhs_gifs/config_edit.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
   <p><em>Editing an existing profile configuration</em></p>
 </div>
 
