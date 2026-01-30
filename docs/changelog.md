@@ -5,7 +5,33 @@ All notable changes to FIT File Faker are documented here.
 This changelog is automatically generated from git commit messages using [git-cliff](https://git-cliff.org/).
 See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on GitHub for downloadable releases.
 
+## [2.1.0](https://github.com/jat255/fit-file-faker/releases/tag/v2.1.0) - (2026-01-30)
+
+### Features
+
+- add --version flag with release date ([aea73c5](https://github.com/jat255/Fit-File-Faker/commit/aea73c5023b8c44f8f7fb1e48cf185fa8bb16c10))
+
+
+### Bug Fixes
+
+- prevent duplicate uploads when MyWhoosh app version updates ([#62](https://github.com/jat255/fit-file-faker/issues/62)) ([d41c478](https://github.com/jat255/Fit-File-Faker/commit/d41c47811198c65a06862c9517fc238174ce67f3))
+
+
+### Build System
+
+- vendor fit-tool library to eliminate external dependency ([#64](https://github.com/jat255/fit-file-faker/issues/64)) ([1bb4822](https://github.com/jat255/Fit-File-Faker/commit/1bb48222541556814e1ab9e8f56325ae05eb55a8))
+
+
+### Miscellaneous Tasks
+
+- pin dependency for fit-tool to 0.9.13 ([94a32ff](https://github.com/jat255/Fit-File-Faker/commit/94a32ffe71ad8605d4797bbf8c018b3afb2756f0))
+
+- fix git cliff processing rules ([a26df4c](https://github.com/jat255/Fit-File-Faker/commit/a26df4cc1d10b397f945465634adaafd06edeb94))
+
 ## [2.0.3](https://github.com/jat255/fit-file-faker/releases/tag/v2.0.3) - (2026-01-24)
+
+
+> **Note:** Versions 2.0.1 and 2.0.2 were skipped due to CI/CD configuration issues during the release process and those versions yanked from PyPI. Please do not use them.
 
 ### Features
 
@@ -23,46 +49,14 @@ See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on 
 - add missing mkdocs-autorefs dependency and fix Windows CI compatibility ([1269fed](https://github.com/jat255/Fit-File-Faker/commit/1269fed94b21285893f674bfe84fdb358b206204))
 
 
-### Documentation
-
-- update changelog with updated git-cliff config ([0fdefaa](https://github.com/jat255/Fit-File-Faker/commit/0fdefaa8190c7288ed606672f1117501f32901fc))
-
-- update changelog for v2.0.0 ([fb22c3c](https://github.com/jat255/Fit-File-Faker/commit/fb22c3c8d0da420fa0e5583d2bc5f0481dbed353))
-
-
 ### CI/CD
 
-- ci: move draft release creation to publish workflow and improve
-release script
-
-Move GitHub draft release creation from release.sh to the publish
-workflow to ensure releases are only created after successful PyPI
-publication. This prevents draft releases for failed builds.
-
-Changes to release.sh:
-- Add comprehensive help system with --help flag
-- Remove draft release creation logic (now in workflow)
-- Update next steps documentation to reflect automated process
-- Improve error messages with help hint
-
-Changes to publish_and_release.yml:
-- Add --draft flag to gh release create command
-- Ensures draft release is created after successful PyPI upload
-
-Benefits:
-- No draft releases for failed builds
-- Better user experience with built-in help
-- Clearer separation of concerns (script vs CI) ([c68fb94](https://github.com/jat255/Fit-File-Faker/commit/c68fb948832b73e55b09a965ebfceb3870a5c3cc))
+- ci: move draft release creation to publish workflow and improve... ([c68fb94](https://github.com/jat255/Fit-File-Faker/commit/c68fb948832b73e55b09a965ebfceb3870a5c3cc))
 
 
 ### Build System
 
 - replace gitlint with commitlint for Windows compatibility ([506f9c9](https://github.com/jat255/Fit-File-Faker/commit/506f9c97377701b53e853c745189081dd0940946))
-
-
-### Miscellaneous Tasks
-
-- bump version to 2.0.3 ([e526ad8](https://github.com/jat255/Fit-File-Faker/commit/e526ad858b27a9ff938b8d6f9ac4ea0eaeff9406))
 
 ## [2.0.0](https://github.com/jat255/fit-file-faker/releases/tag/v2.0.0) - (2026-01-24)
 
@@ -95,8 +89,6 @@ Benefits:
 
 
 ### Miscellaneous Tasks
-
-- bump version to 2.0.0 ([8d6d8a3](https://github.com/jat255/Fit-File-Faker/commit/8d6d8a39cc0a20294071f7d48191a5f535c11cfa))
 
 - Implements conventional commit validation with gitlint ([1f4c279](https://github.com/jat255/Fit-File-Faker/commit/1f4c279cb384362ae4c8a9c862acfa7ef3089f81))
 
