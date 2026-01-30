@@ -55,8 +55,10 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 fit-file-faker = "fit_file_faker.app:run"
 
-[tool.setuptools]
-packages = ["fit_file_faker",  "fit_file_faker.vendor.fit_tool"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fit_file_faker*"]
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 fit_file_faker = ["py.typed"]
