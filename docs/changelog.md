@@ -5,6 +5,18 @@ All notable changes to FIT File Faker are documented here.
 This changelog is automatically generated from git commit messages using [git-cliff](https://git-cliff.org/).
 See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on GitHub for downloadable releases.
 
+## [2.1.2](https://github.com/jat255/fit-file-faker/releases/tag/v2.1.2) - (2026-01-31)
+
+### Bug Fixes
+
+- UTF-8 Decoding Errors and Add Serial Number Documentation ([#66](https://github.com/jat255/fit-file-faker/issues/66)) ([55c9173](https://github.com/jat255/Fit-File-Faker/commit/55c9173689b0aa1cbb9bd3a8532278ddee236663))
+
+## [2.1.1](https://github.com/jat255/fit-file-faker/releases/tag/v2.1.1) - (2026-01-30)
+
+### Bug Fixes
+
+- include all vendor subpackages in distribution ([b365e85](https://github.com/jat255/Fit-File-Faker/commit/b365e85c353b4c12cd810d74cf0471583156cd84))
+
 ## [2.1.0](https://github.com/jat255/fit-file-faker/releases/tag/v2.1.0) - (2026-01-30)
 
 ### Features
