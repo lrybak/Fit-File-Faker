@@ -5,6 +5,14 @@ All notable changes to FIT File Faker are documented here.
 This changelog is automatically generated from git commit messages using [git-cliff](https://git-cliff.org/).
 See our [release history](https://github.com/jat255/Fit-File-Faker/releases) on GitHub for downloadable releases.
 
+## [2.1.3](https://github.com/jat255/fit-file-faker/releases/tag/v2.1.3) - (2026-02-01)
+
+### Documentation
+
+- clarify that serial_number field requires device Unit ID, not Serial Number ([#68](https://github.com/jat255/fit-file-faker/issues/68)) ([d5553ce](https://github.com/jat255/Fit-File-Faker/commit/d5553ce20065e908fd9e4825c072a05a7918d73c))
+
+- update paths to config videos in README ([#67](https://github.com/jat255/fit-file-faker/issues/67)) ([6192294](https://github.com/jat255/Fit-File-Faker/commit/61922943ecbbd0ba17db0900533743b2355eaf3c))
+
 ## [2.1.2](https://github.com/jat255/fit-file-faker/releases/tag/v2.1.2) - (2026-01-31)
 
 ### Bug Fixes
