@@ -276,10 +276,12 @@ def _split_by_lap(
         idx = _lap_index_for_timestamp(ts, ranges)
         buckets[idx] += kcal
 
-    rounded = [int(round(b)) for b in buckets]
-    drift = total - sum(rounded)
-    if rounded:
-        rounded[-1] += drift
+    # Largest-remainder rounding: floor every lap, then hand the leftover kcal
+    # to the laps with the biggest fractions. Never negative, sums to `total`.
+    rounded = [int(b) for b in buckets]
+    by_fraction = sorted(range(len(buckets)), key=lambda i: rounded[i] - buckets[i])
+    for i in by_fraction[: total - sum(rounded)]:
+        rounded[i] += 1
     return rounded
 
 

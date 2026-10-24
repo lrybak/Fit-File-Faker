@@ -262,3 +262,14 @@ class TestCalorieResultDataclass:
         assert r.total_calories == 42
         assert r.per_lap_calories == [10, 20, 12]
         assert r.method == "power"
+
+
+def test_per_lap_split_never_negative_when_rounding_drifts():
+    # Regression (Zwift workout): six 1 s laps at 500 W (~0.54 kcal each) all
+    # round up to 1, total rounds to 3; the old code pushed the -3 drift onto
+    # the empty last lap, which fit_tool rejects as an invalid uint16.
+    records = [_rec(t * 1000, power=500) for t in range(7)]
+    laps = [_lap(t * 1000, t * 1000) for t in range(1, 7)] + [_lap(7000, 8000)]
+    result = calculate_from_records(records, laps, profile=_profile())
+    assert all(c >= 0 for c in result.per_lap_calories)
+    assert sum(result.per_lap_calories) == result.total_calories
